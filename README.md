@@ -16,3 +16,9 @@ msg <agent> "message"         # Send message to agent
 ```
 
 See `CLAUDE.md` for development details.
+
+## Features
+
+- **TUI Manager** - Visual interface for agent management
+- **Message System** - Inter-agent communication via tmux
+- **Registry Sync** - Automatically sync agent info to CLAUDE.md files
