@@ -363,6 +363,7 @@ verify_installation() {
     fi
 }
 
+
 # Show completion message
 show_completion() {
     print_header "Installation Complete"
@@ -374,27 +375,8 @@ show_completion() {
     echo -e "  ${BOLD}${MSG_BINARY_NAME} <agent> <message>${NC}   - Send message to agent"
     echo -e "  ${BOLD}${MSG_BINARY_NAME} --status${NC}            - Show agent status"
 
-    echo -e "\n${CYAN}${BOLD}Quick Start:${NC}"
-    echo "  1. Source your shell config:"
-    echo -e "     ${BOLD}source $(get_shell_config)${NC}"
-    echo ""
-    echo "  2. Launch the TUI manager:"
-    echo -e "     ${BOLD}${TUI_ALIAS}${NC}"
-    echo ""
-    echo "  3. Register agents with 'r' key"
-    echo ""
-    echo "  4. Send messages between agents:"
-    echo -e "     ${BOLD}${MSG_BINARY_NAME} backend \"API ready\"${NC}"
-    echo ""
-    echo "  5. Sync CLAUDE.md files with 's' key in TUI"
-
-    echo -e "\n${CYAN}${BOLD}Key Bindings:${NC}"
-    echo "  q/Ctrl+C  - Quit"
-    echo "  ↑/↓       - Navigate"
-    echo "  r         - Register agent"
-    echo "  u         - Unregister agent"
-    echo "  s         - Sync CLAUDE.md files"
-    echo "  Enter     - Select pane"
+    echo -e "\n${CYAN}${BOLD}Ready to use:${NC}"
+    echo -e "  ${BOLD}${TUI_ALIAS}${NC}  - Launch TUI manager"
 
     echo -e "\n${BLUE}Happy coding with Slaygent!${NC}"
 }
@@ -418,6 +400,12 @@ main() {
 
     if verify_installation; then
         show_completion
+
+        # Auto-source shell config
+        local shell_config
+        shell_config=$(get_shell_config)
+        print_info "Auto-sourcing shell config..."
+        exec "$SHELL" -l
     else
         print_error "Installation verification failed"
         print_info "Please check the errors above and try again"
