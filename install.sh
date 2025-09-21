@@ -82,23 +82,85 @@ get_shell_config() {
     fi
 }
 
+# Detect operating system and package manager
+detect_os() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        OS="macos"
+        if command_exists brew; then
+            PKG_MANAGER="brew"
+        else
+            print_error "Homebrew not found on macOS"
+            print_info "Install from: https://brew.sh"
+            exit 1
+        fi
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        OS="linux"
+        if command_exists apt; then
+            PKG_MANAGER="apt"
+        elif command_exists dnf; then
+            PKG_MANAGER="dnf"
+        elif command_exists yum; then
+            PKG_MANAGER="yum"
+        elif command_exists pacman; then
+            PKG_MANAGER="pacman"
+        elif command_exists zypper; then
+            PKG_MANAGER="zypper"
+        else
+            print_error "No supported package manager found"
+            print_info "Supported: apt, dnf, yum, pacman, zypper"
+            exit 1
+        fi
+    else
+        print_error "Unsupported operating system: $OSTYPE"
+        exit 1
+    fi
+
+    print_info "Detected OS: $OS, Package Manager: $PKG_MANAGER"
+}
+
+# Install package using detected package manager
+install_package() {
+    local package="$1"
+    local linux_package="$2"
+
+    case "$PKG_MANAGER" in
+        brew)
+            brew install "$package"
+            ;;
+        apt)
+            sudo apt update && sudo apt install -y "${linux_package:-$package}"
+            ;;
+        dnf)
+            sudo dnf install -y "${linux_package:-$package}"
+            ;;
+        yum)
+            sudo yum install -y "${linux_package:-$package}"
+            ;;
+        pacman)
+            sudo pacman -S --noconfirm "${linux_package:-$package}"
+            ;;
+        zypper)
+            sudo zypper install -y "${linux_package:-$package}"
+            ;;
+        *)
+            print_error "Unsupported package manager: $PKG_MANAGER"
+            exit 1
+            ;;
+    esac
+}
+
 # Check and install prerequisites
 check_prerequisites() {
     print_header "Checking Prerequisites"
 
-    # Check if brew is installed
-    if ! command_exists brew; then
-        print_error "Homebrew not found"
-        print_info "Install from: https://brew.sh"
-        exit 1
-    fi
+    detect_os
 
     # Check and install required tools
     local tools_to_install=()
 
     if ! command_exists go; then
         print_warning "Go not found"
-        tools_to_install+=("go")
+        tools_to_install+=("go:golang")
     else
         local go_version
         go_version=$(go version | awk '{print $3}' | sed 's/go//')
@@ -107,31 +169,48 @@ check_prerequisites() {
 
     if ! command_exists tmux; then
         print_warning "tmux not found"
-        tools_to_install+=("tmux")
+        tools_to_install+=("tmux:tmux")
     else
         print_info "tmux version: $(tmux -V)"
     fi
 
     if ! command_exists fd; then
         print_warning "fd not found"
-        tools_to_install+=("fd")
+        if [[ "$OS" == "linux" ]]; then
+            tools_to_install+=("fd:fd-find")
+        else
+            tools_to_install+=("fd:fd")
+        fi
     else
         print_info "fd version: $(fd --version | head -1)"
     fi
 
     # Install missing tools
     if [[ ${#tools_to_install[@]} -gt 0 ]]; then
-        print_info "Installing missing tools: ${tools_to_install[*]}"
+        print_info "Installing missing tools..."
 
-        for tool in "${tools_to_install[@]}"; do
-            print_info "Installing ${tool}..."
-            if brew install "${tool}"; then
-                print_success "${tool} installed"
+        for tool_spec in "${tools_to_install[@]}"; do
+            local brew_name="${tool_spec%%:*}"
+            local linux_name="${tool_spec##*:}"
+
+            print_info "Installing ${brew_name}..."
+            if install_package "$brew_name" "$linux_name"; then
+                print_success "${brew_name} installed"
             else
-                print_error "Failed to install ${tool}"
+                print_error "Failed to install ${brew_name}"
                 exit 1
             fi
         done
+
+        # Special handling for fd on Ubuntu/Debian - create symlink
+        if [[ "$PKG_MANAGER" == "apt" && ! command_exists fd ]]; then
+            if command_exists fdfind; then
+                print_info "Creating fd symlink for fdfind"
+                mkdir -p "$HOME/.local/bin"
+                ln -sf "$(which fdfind)" "$HOME/.local/bin/fd"
+                print_success "fd symlink created"
+            fi
+        fi
     fi
 
     print_success "All prerequisites met"
