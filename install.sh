@@ -406,6 +406,32 @@ initialize_registry() {
     fi
 }
 
+# Run initial sync to set up CLAUDE.md files
+run_initial_sync() {
+    print_header "Running Initial Sync"
+
+    # Find the sync script
+    local sync_script=""
+    if [[ -f "app/scripts/sync-claude.sh" ]]; then
+        sync_script="app/scripts/sync-claude.sh"
+    elif [[ -f "scripts/sync-claude.sh" ]]; then
+        sync_script="scripts/sync-claude.sh"
+    else
+        print_warning "Sync script not found, skipping initial sync"
+        return 0
+    fi
+
+    print_info "Running basic sync to initialize CLAUDE.md files..."
+
+    # Run sync script with auto-confirmation
+    if bash -c "echo 'y' | bash ${sync_script}" 2>/dev/null; then
+        print_success "Initial sync completed successfully"
+    else
+        print_warning "Initial sync failed, but installation can continue"
+        print_info "You can run sync manually later with: slay -> s"
+    fi
+}
+
 # Verify installation
 verify_installation() {
     print_header "Verifying Installation"
@@ -476,6 +502,7 @@ main() {
     configure_aliases
     update_path
     initialize_registry
+    run_initial_sync
 
     if verify_installation; then
         show_completion
