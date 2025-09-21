@@ -16,8 +16,8 @@ brew install willyv3/tap/slaygent-comms
 
 ### Linux (Direct Install)
 ```bash
-curl -L https://github.com/WillyV3/slaygent-comms/archive/v0.1.1.tar.gz | tar xz
-cd slaygent-comms-0.1.1
+curl -L https://github.com/WillyV3/slaygent-comms/archive/v0.1.2.tar.gz | tar xz
+cd slaygent-comms-0.1.2
 ./install.sh
 ```
 
