@@ -132,11 +132,36 @@ func (m model) View() string {
 	})
 }
 
+// findSyncScript returns the path to the sync script, checking multiple locations
+func findSyncScript(scriptName string) string {
+	// Try relative path (development)
+	relativePath := "../scripts/" + scriptName
+	if _, err := os.Stat(relativePath); err == nil {
+		return relativePath
+	}
+
+	// Try Homebrew libexec location
+	brewPath := "/opt/homebrew/lib/slaygent-comms/" + scriptName
+	if _, err := os.Stat(brewPath); err == nil {
+		return brewPath
+	}
+
+	// Try Intel Homebrew location
+	intelBrewPath := "/usr/local/lib/slaygent-comms/" + scriptName
+	if _, err := os.Stat(intelBrewPath); err == nil {
+		return intelBrewPath
+	}
+
+	// Fallback to relative path (will fail but with clear error)
+	return relativePath
+}
+
 // runSyncCommand executes the sync script
 func (m model) runSyncCommand() tea.Cmd {
 	return func() tea.Msg {
-		// Execute sync script and capture output to count files
-		cmd := exec.Command("bash", "-c", "echo 'y' | ../scripts/sync-claude.sh")
+		// Find and execute sync script
+		scriptPath := findSyncScript("sync-claude.sh")
+		cmd := exec.Command("bash", "-c", fmt.Sprintf("echo 'y' | %s", scriptPath))
 		cmd.Dir = "."
 		output, err := cmd.Output()
 		if err != nil {
@@ -162,11 +187,12 @@ func (m model) runCustomSyncCommand() tea.Cmd {
 		// Get the custom content from the editor
 		customContent := m.syncEditor.Value()
 
-		// Create a heredoc command that preserves newlines properly
-		scriptCmd := fmt.Sprintf(`echo 'y' | ../scripts/custom-sync-claude.sh "$(cat <<'EOF'
+		// Find custom sync script and create heredoc command
+		scriptPath := findSyncScript("custom-sync-claude.sh")
+		scriptCmd := fmt.Sprintf(`echo 'y' | %s "$(cat <<'EOF'
 %s
 EOF
-)"`, customContent)
+)"`, scriptPath, customContent)
 
 		// Execute custom sync script with the content via heredoc
 		cmd := exec.Command("bash", "-c", scriptCmd)
