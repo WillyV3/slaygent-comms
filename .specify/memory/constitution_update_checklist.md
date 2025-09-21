@@ -14,39 +14,30 @@ When amending the constitution (`/memory/constitution.md`), ensure all dependent
 
 ### Article-specific updates:
 
-#### Article I (Library-First):
-- [ ] Ensure templates emphasize library creation
-- [ ] Update CLI command examples
-- [ ] Add llms.txt documentation requirements
+#### Article I (Single-File Until Idiomatic):
+- [x] Ensure templates emphasize main.go start
+- [x] Update file organization guidance
+- [x] Add splitting criteria documentation
 
-#### Article II (CLI Interface):
-- [ ] Update CLI flag requirements in templates
-- [ ] Add text I/O protocol reminders
+#### Article II (No Overengineering):
+- [x] Update abstraction avoidance in templates
+- [x] Add "3+ implementations" rules
+- [x] Include YAGNI enforcement
 
-#### Article III (Test-First):
-- [ ] Update test order in all templates
-- [ ] Emphasize TDD requirements
-- [ ] Add test approval gates
+#### Article III (No Fallbacks Ever):
+- [x] Update error handling patterns
+- [x] Emphasize fail-fast principles
+- [x] Add clear error display requirements
 
-#### Article IV (Integration Testing):
-- [ ] List integration test triggers
-- [ ] Update test type priorities
-- [ ] Add real dependency requirements
+#### Article IV (Self-Documenting Code):
+- [x] Update naming conventions
+- [x] Add comment restrictions
+- [x] Include readability requirements
 
-#### Article V (Observability):
-- [ ] Add logging requirements to templates
-- [ ] Include multi-tier log streaming
-- [ ] Update performance monitoring sections
-
-#### Article VI (Versioning):
-- [ ] Add version increment reminders
-- [ ] Include breaking change procedures
-- [ ] Update migration requirements
-
-#### Article VII (Simplicity):
-- [ ] Update project count limits
-- [ ] Add pattern prohibition examples
-- [ ] Include YAGNI reminders
+#### Article V (TUI Responsiveness):
+- [x] Add Bubble Tea command patterns
+- [x] Include performance requirements
+- [x] Update async operation guidelines
 
 ## Validation Steps
 
@@ -76,9 +67,9 @@ Watch for these often-forgotten updates:
 
 ## Template Sync Status
 
-Last sync check: 2025-07-16
-- Constitution version: 2.1.1
-- Templates aligned: ❌ (missing versioning, observability details)
+Last sync check: 2025-09-16
+- Constitution version: 1.0.0
+- Templates aligned: ✅ (TUI-focused constitution implemented)
 
 ---
 
