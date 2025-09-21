@@ -4,9 +4,19 @@ Inter-agent communication system for AI coding assistants in tmux panes.
 
 ## Quick Install
 
+### macOS (Homebrew)
 ```bash
 brew install willyv3/tap/slaygent-comms
 ```
+
+### Linux (Direct Install)
+```bash
+curl -L https://github.com/WillyV3/slaygent-comms/archive/v0.0.6.tar.gz | tar xz
+cd slaygent-comms-0.0.6
+./install.sh
+```
+
+> **Note**: Homebrew support for Linux is coming soon!
 
 ## Usage
 
