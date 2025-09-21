@@ -132,7 +132,7 @@ views/
 
 <!-- SLAYGENT-REGISTRY-START -->
 # Inter-Agent Communication
-@/Users/williamvansickleiii/.slaygent/registry.json
+@/home/wv3/.slaygent/registry.json
 
 To send messages to other coding agents, use: `msg <agent_name> "<message>"`
 Example: `msg backend-dev "Please update the API endpoint"`
