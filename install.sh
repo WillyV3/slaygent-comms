@@ -242,27 +242,41 @@ configure_aliases() {
 
     # Check and add TUI alias
     if [[ -f "${shell_config}" ]] && grep -q "alias ${TUI_ALIAS}=" "${shell_config}"; then
-        print_info "TUI alias '${TUI_ALIAS}' already configured"
+        local existing_alias=$(grep "alias ${TUI_ALIAS}=" "${shell_config}")
+        print_info "TUI alias '${TUI_ALIAS}' already exists: ${existing_alias}"
+
+        # Check if it points to the right command
+        if echo "${existing_alias}" | grep -q "slaygent-manager"; then
+            print_success "TUI alias correctly configured"
+        else
+            print_warning "TUI alias exists but points to different command: ${existing_alias}"
+            print_info "Consider updating to: alias ${TUI_ALIAS}='slaygent-manager'"
+        fi
     else
         if [[ "${aliases_added}" == false ]]; then
             echo "" >> "${shell_config}"
             echo "# Slaygent Communication Suite" >> "${shell_config}"
             aliases_added=true
         fi
-        echo "alias ${TUI_ALIAS}='${TUI_INSTALLED}'" >> "${shell_config}"
-        print_success "TUI alias '${TUI_ALIAS}' configured"
+        echo "alias ${TUI_ALIAS}='slaygent-manager'" >> "${shell_config}"
+        print_success "TUI alias '${TUI_ALIAS}' added: alias ${TUI_ALIAS}='slaygent-manager'"
     fi
 
-    # Check and add messenger alias
-    if [[ -f "${shell_config}" ]] && grep -q "alias ${MSG_BINARY_NAME}=" "${shell_config}"; then
-        print_info "Messenger alias '${MSG_BINARY_NAME}' already configured"
-    else
-        if [[ "${aliases_added}" == false ]]; then
-            echo "" >> "${shell_config}"
-            echo "# Slaygent Communication Suite" >> "${shell_config}"
+    # Check if msg command is accessible and log details
+    print_info "Checking msg command accessibility..."
+    if command -v msg >/dev/null 2>&1; then
+        local msg_location=$(which msg)
+        print_success "msg command found at: ${msg_location}"
+        if [[ "${msg_location}" == "${MSG_INSTALLED}" ]]; then
+            print_success "msg points to correct installation"
+        else
+            print_warning "msg found at different location: ${msg_location}"
+            print_info "Expected location: ${MSG_INSTALLED}"
         fi
-        echo "alias ${MSG_BINARY_NAME}='${MSG_INSTALLED}'" >> "${shell_config}"
-        print_success "Messenger alias '${MSG_BINARY_NAME}' configured"
+    else
+        print_warning "msg command not found in PATH"
+        print_info "Installed at: ${MSG_INSTALLED}"
+        print_info "PATH may need to be refreshed"
     fi
 
     if [[ "${aliases_added}" == true ]] || grep -q "Slaygent Communication Suite" "${shell_config}"; then
