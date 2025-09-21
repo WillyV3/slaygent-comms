@@ -140,16 +140,18 @@ func findSyncScript(scriptName string) string {
 		return relativePath
 	}
 
-	// Try Homebrew libexec location
-	brewPath := "/opt/homebrew/lib/slaygent-comms/" + scriptName
-	if _, err := os.Stat(brewPath); err == nil {
-		return brewPath
+	// Try Homebrew libexec locations for different platforms
+	possiblePaths := []string{
+		"/opt/homebrew/lib/slaygent-comms/" + scriptName,              // macOS ARM Homebrew
+		"/usr/local/lib/slaygent-comms/" + scriptName,                 // macOS Intel Homebrew
+		"/home/linuxbrew/.linuxbrew/lib/slaygent-comms/" + scriptName, // Linux Homebrew
+		"/usr/lib/slaygent-comms/" + scriptName,                       // System install
 	}
 
-	// Try Intel Homebrew location
-	intelBrewPath := "/usr/local/lib/slaygent-comms/" + scriptName
-	if _, err := os.Stat(intelBrewPath); err == nil {
-		return intelBrewPath
+	for _, path := range possiblePaths {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
 	}
 
 	// Fallback to relative path (will fail but with clear error)
