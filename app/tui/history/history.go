@@ -238,21 +238,28 @@ func (m *Model) FormatConversationListWithSelection() string {
 }
 
 func getRelativeTimeTag(t time.Time, now time.Time) string {
-	diff := now.Sub(t)
-	days := int(diff.Hours() / 24)
+	// Use date-based comparison for more accurate day boundaries
+	nowDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tDate := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 
-	if days == 0 {
+	daysDiff := int(nowDate.Sub(tDate).Hours() / 24)
+
+	if daysDiff == 0 {
 		return "today"
-	} else if days == 1 {
+	} else if daysDiff == 1 {
 		return "yesterday"
-	} else if days <= 7 {
-		return fmt.Sprintf("%d days ago", days)
-	} else if days <= 14 {
+	} else if daysDiff <= 7 {
+		return fmt.Sprintf("%d days ago", daysDiff)
+	} else if daysDiff <= 14 {
 		return "last week"
-	} else if days <= 30 {
-		return fmt.Sprintf("%d weeks ago", days/7)
-	} else if days <= 365 {
-		months := days / 30
+	} else if daysDiff <= 30 {
+		weeks := daysDiff / 7
+		if weeks == 1 {
+			return "1 week ago"
+		}
+		return fmt.Sprintf("%d weeks ago", weeks)
+	} else if daysDiff <= 365 {
+		months := daysDiff / 30
 		if months == 1 {
 			return "last month"
 		}

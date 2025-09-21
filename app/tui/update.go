@@ -378,6 +378,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+			return m, nil
 		case "e":
 			if m.viewMode == "agents" {
 				// Edit/customize sync clauses
