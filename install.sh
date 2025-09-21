@@ -203,7 +203,7 @@ check_prerequisites() {
         done
 
         # Special handling for fd on Ubuntu/Debian - create symlink
-        if [[ "$PKG_MANAGER" == "apt" && ! command_exists fd ]]; then
+        if [[ "$PKG_MANAGER" == "apt" ]] && ! command_exists fd; then
             if command_exists fdfind; then
                 print_info "Creating fd symlink for fdfind"
                 mkdir -p "$HOME/.local/bin"
