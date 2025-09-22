@@ -1,0 +1,165 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Slaygent Communication Suite
+
+Inter-agent communication system for AI coding assistants in tmux panes.
+
+## Quick Start Commands
+```bash
+./install.sh                    # Install everything
+slay                           # Launch TUI manager
+msg <agent> "message"          # Send message
+./build.sh                     # Build TUI from current dir
+```
+
+## Development Commands
+
+### Building Components
+```bash
+# Build TUI Manager (must be run from app/tui directory)
+cd app/tui && go build -o slaygent-manager
+
+# Build Messenger (must be run from app/messenger directory)
+cd app/messenger && go build -o msg
+
+# Full installation (builds and installs everything)
+./install.sh
+```
+
+### Testing
+```bash
+# Run all tests (must be run from tests directory)
+cd tests && go test ./...
+
+# Run specific test categories
+cd tests && go test ./core/...        # Core functionality tests
+cd tests && go test ./contract/...    # Contract/integration tests
+cd tests && go test ./integration/... # Integration tests
+```
+
+### Database Debugging
+```bash
+# Inspect message database
+sqlite3 ~/.slaygent/messages.db
+.schema messages
+SELECT * FROM messages ORDER BY sent_at DESC LIMIT 10;
+```
+
+## Architecture Overview
+
+This is a **multi-module Go project** with three separate go.mod files:
+- `app/tui/go.mod` - Bubble Tea TUI manager (requires Go 1.23.0+)
+- `app/messenger/go.mod` - CLI messaging tool
+- `tests/go.mod` - Test suite (requires Go 1.25.1+)
+
+### Core Components
+```
+├── app/tui/                 # Bubble Tea TUI Manager
+│   ├── main.go              # Entry point and model state
+│   ├── update.go            # Separated Update() logic
+│   ├── views/               # Stateless rendering modules
+│   │   ├── agents.go        # Agent table (uses bubble-table)
+│   │   ├── messages.go      # Message history with viewport
+│   │   ├── sync.go          # Sync customization view
+│   │   ├── help.go          # Tabbed help system
+│   │   └── help-docs/*.md   # Embedded help content
+│   ├── registry.go          # Agent registry operations
+│   ├── tmux.go             # Tmux pane detection
+│   └── history/            # SQLite database layer
+├── app/messenger/          # CLI messaging tool
+│   ├── msg.go              # Main CLI interface
+│   └── db.go               # Database operations
+└── tests/                  # Comprehensive test suite
+    ├── core/               # Unit tests for core logic
+    ├── contract/           # API contract tests
+    └── integration/        # End-to-end tests
+```
+
+### Key Bubble Tea Patterns Used
+- **Responsive Design**: Model handles `tea.WindowSizeMsg` for proper layout
+- **Stateless Views**: Views receive dimensions and data, return rendered strings
+- **Embedded Assets**: Help system uses `embed.FS` for markdown files
+- **Modern Tables**: Uses `bubble-table` instead of lipgloss tables for better text handling
+
+### Data Storage
+- **Registry**: `~/.slaygent/registry.json` - Agent discovery and directory mapping
+- **Messages**: `~/.slaygent/messages.db` - SQLite database for conversation history
+- **Binaries**: `~/.local/bin/slay`, `~/.local/bin/msg` - Installed executables
+
+## Recent Major Changes
+
+### TUI Updates (2025)
+- **Bubble Table Migration**: Switched from lipgloss table to bubble-table for better text handling
+- **Help System**: Added tabbed help interface with embedded markdown docs
+- **Responsive Layout**: Proper handling of terminal resize events
+- **Message View Fix**: Viewport dimensions properly initialized on view switch
+
+### Development Practices
+- **Modern CLI Tools**: Always use `fd` instead of `find`, `rg` instead of `grep`
+- **Cell Styling**: Use `NewStyledCell()` for individual cells in bubble-table
+- **Module Awareness**: Each component has its own go.mod - build from correct directory
+
+## Messaging Protocol
+
+### Basic Usage
+```bash
+msg <agent_name> "message"                    # Send message
+msg --from <sender> <receiver> "response"    # Reply with proper logging
+msg --status                                 # Check agent status
+```
+
+### Message Format (what agents receive)
+```
+{Receiving msg from: <sender>} "<message>"
+{When ready to respond use: msg --from <receiver> <sender> 'response'}
+```
+
+## Navigation Reference
+
+### TUI Hotkeys
+```
+Agents View:
+e - Edit sync clause      s - Quick sync      ? - Help system
+m - View messages        a - Register agent   r - Refresh list
+↑/↓ - Navigate           q - Quit
+
+Messages View:
+←/→ - Switch panels      d - Delete conversation
+↑/↓ - Navigate          ESC - Back to agents
+
+Help View:
+←/→ - Switch tabs       ↑/↓ - Scroll content
+ESC - Back to agents
+
+Sync View:
+Tab - Toggle edit mode   c - Custom sync
+ESC - Back to agents
+```
+
+## Troubleshooting
+
+### Common Build Issues
+- **Wrong directory**: Each module must be built from its specific directory
+- **Go version**: TUI requires Go 1.23.0+, tests require Go 1.25.1+
+- **Missing dependencies**: Run `go mod tidy` in each module directory
+
+### Runtime Issues
+- **Agent not found**: Check registry with `msg --status` or TUI
+- **Messages not delivering**: Verify tmux pane accessibility
+- **Database errors**: Check permissions on `~/.slaygent/messages.db`
+
+<!-- SLAYGENT-REGISTRY-START -->
+# Inter-Agent Communication
+@/Users/williamvansickleiii/.slaygent/registry.json
+
+To send messages to other coding agents, use: `msg <agent_name> "<message>"`
+Example: `msg backend-dev "Please update the API endpoint"`
+
+IMPORTANT: When responding to messages, always use the --from flag:
+`msg --from <your_agent_name> <target_agent> "<response>"`
+This ensures proper conversation logging and tracking.
+
+<!-- Registry automatically synced by slaygent-manager -->
+<!-- SLAYGENT-REGISTRY-END -->
