@@ -373,6 +373,17 @@ func (m model) refreshAll() model {
 		}
 	} else {
 		m.rows = rows
+		// Auto-adopt remote agent registrations
+		if m.registry != nil && m.sshRegistry != nil {
+			for _, conn := range m.sshRegistry.GetConnections() {
+				remoteAgents := queryRemoteRegistry(conn)
+				for _, agent := range remoteAgents {
+					if !m.registry.IsRegistered(agent.AgentType, agent.Directory) {
+						m.registry.AddAgent(agent.Name, agent.AgentType, agent.Directory, conn.Name)
+					}
+				}
+			}
+		}
 		// Sync registry to remove stale entries
 		if m.registry != nil {
 			m.registry.SyncWithActive(rows)
