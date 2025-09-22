@@ -175,7 +175,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Handle different input targets
 				switch m.inputTarget {
 				case "register":
-					// Save agent registration with the entered name
+					// Save agent registration with the entered name (only for local agents)
 					selectedRowIndex := m.table.GetHighlightedRowIndex()
 					if m.inputBuffer != "" && selectedRowIndex >= 0 && selectedRowIndex < len(m.rows) {
 						row := m.rows[selectedRowIndex]
@@ -183,8 +183,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							agentType := row[2]     // AGENT column
 							fullDirectory := row[1] // DIRECTORY column (full path)
 							machine := row[5]       // MACHINE column
-							// Use RegisterWithMachine for both local and remote agents
-							m.registry.RegisterWithMachine(m.inputBuffer, agentType, fullDirectory, machine)
+							// Only allow registration of local agents (machine == "host")
+							if machine == "host" {
+								m.registry.RegisterWithMachine(m.inputBuffer, agentType, fullDirectory, machine)
+							}
 						}
 					}
 					// Exit input mode
@@ -588,7 +590,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.deleteTarget = 0
 			}
 		case "a":
-			// Register agent - enter input mode
+			// Register agent - enter input mode (only for local agents)
 			selectedRowIndex := m.table.GetHighlightedRowIndex()
 			if selectedRowIndex >= 0 && selectedRowIndex < len(m.rows) && len(m.rows) > 0 {
 				row := m.rows[selectedRowIndex]
@@ -597,17 +599,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					fullDirectory := row[1] // DIRECTORY column (full path)
 					machine := row[5]       // MACHINE column
 
-					if m.registry.IsRegisteredWithMachine(agentType, fullDirectory, machine) {
-						// Already registered, deregister it
-						m.registry.DeregisterWithMachine(agentType, fullDirectory, machine)
-						// Refresh everything
-						m = m.refreshAll()
-					} else {
-						// Enter input mode to get name
-						m.inputMode = true
-						m.inputBuffer = ""
-						m.inputTarget = "register"
+					// Only allow registration/deregistration for local agents
+					if machine == "host" {
+						if m.registry.IsRegisteredWithMachine(agentType, fullDirectory, machine) {
+							// Already registered, deregister it
+							m.registry.DeregisterWithMachine(agentType, fullDirectory, machine)
+							// Refresh everything
+							m = m.refreshAll()
+						} else {
+							// Enter input mode to get name
+							m.inputMode = true
+							m.inputBuffer = ""
+							m.inputTarget = "register"
+						}
 					}
+					// Ignore 'a' key for remote agents (machine != "host")
 				}
 			}
 		case "z":

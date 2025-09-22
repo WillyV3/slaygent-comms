@@ -83,52 +83,30 @@ func getLocalTmuxPanes() ([][]string, error) {
 	return parseTmuxOutput(string(output))
 }
 
-// getRemoteTmuxPanes gets tmux panes from all registered SSH connections using registry-based detection
+// getRemoteTmuxPanes gets registered agents from remote registries only (simplified approach)
 func getRemoteTmuxPanes(sshRegistry *SSHRegistry) [][]string {
 	var allRemoteRows [][]string
 
 	for _, conn := range sshRegistry.GetConnections() {
-		// Get actual running agents from remote tmux sessions
-		runningRemoteAgents := queryRemoteTmuxPanes(conn)
-		// Get registered agents from remote registry
+		// Get only registered agents from remote registry
 		remoteRegistry := queryRemoteRegistry(conn)
 
-		// Convert running agents to display rows with proper registration status
-		for _, runningAgent := range runningRemoteAgents {
+		// Convert registered agents to display rows
+		for _, regAgent := range remoteRegistry {
 			// Skip agents that have Mac-style paths (cross-contamination)
-			if strings.Contains(runningAgent.Directory, "/Users/williamvansickleiii") {
+			if strings.Contains(regAgent.Directory, "/Users/williamvansickleiii") {
 				continue
 			}
 
-			// Check if this running agent is registered in the remote registry
-			registeredName := ""
-			isRegistered := false
-			for _, regAgent := range remoteRegistry {
-				if regAgent.AgentType == runningAgent.AgentType &&
-				   regAgent.Directory == runningAgent.Directory {
-					// Agent matches - use the registered name regardless of machine field
-					registeredName = regAgent.Name
-					isRegistered = true
-					break
-				}
-			}
-
-			// Create display row with correct registration status
-			displayName := "NR" // Default to "Not Registered"
-			regStatus := "✗"
-			if isRegistered {
-				displayName = registeredName
-				regStatus = "✓"
-			}
-
+			// Create display row for registered agent
 			row := []string{
-				runningAgent.Name,             // Pane ID
-				runningAgent.Directory,        // Directory
-				runningAgent.AgentType,       // Agent type
-				displayName,                  // Display name (registered name or "NR")
-				"active",                     // Status
-				conn.Name,                    // Machine name
-				regStatus,                    // Registration status
+				regAgent.Name + "@" + conn.Name, // Pane ID with machine identifier
+				regAgent.Directory,               // Directory
+				regAgent.AgentType,              // Agent type
+				regAgent.Name,                   // Display name (registered name)
+				"remote",                        // Status (remote registered agent)
+				conn.Name,                       // Machine name
+				"✓",                            // Registration status (always registered)
 			}
 			allRemoteRows = append(allRemoteRows, row)
 		}
@@ -137,71 +115,7 @@ func getRemoteTmuxPanes(sshRegistry *SSHRegistry) [][]string {
 	return allRemoteRows
 }
 
-// queryRemoteTmuxPanes gets actual running tmux panes from remote machine
-func queryRemoteTmuxPanes(conn SSHConnection) []RegisteredAgent {
-	// Build SSH command to query remote tmux panes
-	sshParts := strings.Fields(conn.ConnectCommand)
-	if len(sshParts) == 0 {
-		return nil
-	}
-
-	// Add SSH key if specified
-	if conn.SSHKey != "" {
-		expandedKey := expandSSHKey(conn.SSHKey)
-		sshParts = append(sshParts[:1], append([]string{"-i", expandedKey}, sshParts[1:]...)...)
-	}
-
-	// Query remote tmux panes (same format as local)
-	format := "#{session_name}:#{session_id}:#{window_index}.#{pane_index}:#{pane_current_path}:#{pane_current_command}:#{?pane_active,active,idle}"
-	remoteCmd := fmt.Sprintf("tmux list-panes -a -F '%s' 2>/dev/null || echo ''", format)
-	fullCmd := append(sshParts, remoteCmd)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, fullCmd[0], fullCmd[1:]...)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil
-	}
-
-	// Parse tmux output into agent structs
-	var agents []RegisteredAgent
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		parts := strings.Split(line, ":")
-		if len(parts) < 6 {
-			continue
-		}
-
-		sessionName := parts[0]
-		windowPane := parts[2]
-		directory := parts[3]
-		command := parts[4]
-
-		// Detect agent type
-		agentType := detectAgentType(command)
-		if agentType == "unknown" {
-			continue // Skip non-AI agents
-		}
-
-		// Create agent struct
-		fullPaneID := sessionName + ":" + windowPane
-		agents = append(agents, RegisteredAgent{
-			Name:      fullPaneID,
-			AgentType: agentType,
-			Directory: directory,
-			Machine:   conn.Name, // Will be used for comparison
-		})
-	}
-
-	return agents
-}
+// Removed queryRemoteTmuxPanes - simplified approach uses registry-only detection
 
 // expandSSHKey expands ~ in SSH key paths
 func expandSSHKey(path string) string {
