@@ -359,6 +359,11 @@ func syncTickCmd() tea.Cmd {
 
 // refreshAll refreshes tmux data, syncs registry, and rebuilds table
 func (m model) refreshAll() model {
+	// Reload SSH registry to pick up changes
+	if sshRegistry, err := NewSSHRegistry(); err == nil {
+		m.sshRegistry = sshRegistry
+	}
+
 	// Get fresh tmux data from local and remote machines
 	rows, err := getTmuxPanesWithSSH(m.registry, m.sshRegistry)
 	if err != nil {

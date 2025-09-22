@@ -10,10 +10,7 @@ import (
 	"time"
 )
 
-// getTmuxPanes returns tmux pane information as a slice of row data from local and remote machines
-func getTmuxPanes(registry *Registry) ([][]string, error) {
-	return getTmuxPanesWithSSH(registry, nil)
-}
+// Removed unused getTmuxPanes() function - use getTmuxPanesWithSSH() directly
 
 // getTmuxPanesWithSSH returns tmux pane information from local and remote machines
 func getTmuxPanesWithSSH(registry *Registry, sshRegistry *SSHRegistry) ([][]string, error) {
