@@ -30,6 +30,24 @@ msg <agent> "message"         # Send message to agent
 
 See `CLAUDE.md` for development details.
 
+## Updating
+
+### Option 1: Homebrew Users
+```bash
+brew upgrade willyv3/tap/slaygent-comms
+```
+
+### Option 2: Direct Install Users
+Switch to Homebrew for easier updates:
+```bash
+# Install Homebrew on Linux (if not already installed)
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Then use standard Homebrew update workflow
+brew install willyv3/tap/slaygent-comms
+brew upgrade willyv3/tap/slaygent-comms
+```
+
 ## Features
 
 - **TUI Manager** - Visual interface for agent management
