@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -79,34 +80,48 @@ func getLocalTmuxPanes() ([][]string, error) {
 	return parseTmuxOutput(string(output))
 }
 
-// getRemoteTmuxPanes gets tmux panes from all registered SSH connections
+// getRemoteTmuxPanes gets tmux panes from all registered SSH connections using registry-based detection
 func getRemoteTmuxPanes(sshRegistry *SSHRegistry) [][]string {
 	var allRemoteRows [][]string
 
 	for _, conn := range sshRegistry.GetConnections() {
-		remoteRows := queryRemoteTmuxPanes(conn)
-		// Add machine name to each row
-		for _, row := range remoteRows {
-			if len(row) >= 6 {
-				// Insert machine name at position 5 (between status and registered)
-				newRow := make([]string, 7)
-				copy(newRow[:5], row[:5])     // Copy pane, directory, agent, name, status
-				newRow[5] = conn.Name         // Set machine name
-				newRow[6] = row[5]           // Copy registered status
-				allRemoteRows = append(allRemoteRows, newRow)
+		// Get registered agents from remote machine (like msg-ssh does)
+		remoteAgents := queryRemoteRegistry(conn)
+
+		// Convert registered agents to display rows
+		for _, agent := range remoteAgents {
+			// Create display row for registered remote agent
+			row := []string{
+				agent.Name,                    // Pane ID (use agent name for remote)
+				agent.Directory,               // Directory
+				agent.AgentType,              // Agent type
+				agent.Name,                   // Display name
+				"active",                     // Status (assume active if registered)
+				conn.Name,                    // Machine name
+				"✓",                         // Registered (always true for registry agents)
 			}
+			allRemoteRows = append(allRemoteRows, row)
 		}
 	}
 
 	return allRemoteRows
 }
 
-// queryRemoteTmuxPanes queries a specific remote machine for tmux panes
-func queryRemoteTmuxPanes(conn SSHConnection) [][]string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+// Removed queryRemoteTmuxPanes - now using registry-based detection like msg-ssh
 
-	// Build SSH command
+// expandSSHKey expands ~ in SSH key paths
+func expandSSHKey(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
+}
+
+// queryRemoteRegistry gets registered agents from remote machine (copied from msg-ssh)
+func queryRemoteRegistry(conn SSHConnection) []RegistryEntry {
+	// Build SSH command to query remote registry
 	sshParts := strings.Fields(conn.ConnectCommand)
 	if len(sshParts) == 0 {
 		return nil
@@ -118,34 +133,33 @@ func queryRemoteTmuxPanes(conn SSHConnection) [][]string {
 		sshParts = append(sshParts[:1], append([]string{"-i", expandedKey}, sshParts[1:]...)...)
 	}
 
-	// Build remote tmux command
-	format := "#{session_name}:#{session_id}:#{window_index}.#{pane_index}:#{pane_current_path}:#{pane_current_command}:#{?pane_active,active,idle}"
-	remoteTmuxCmd := fmt.Sprintf("tmux list-panes -a -F '%s' 2>/dev/null || echo ''", format)
+	// Query remote registry (same as msg-ssh)
+	remoteCmd := "cat ~/.slaygent/registry.json 2>/dev/null || echo '[]'"
+	fullCmd := append(sshParts, remoteCmd)
 
-	// Execute SSH command
-	fullCmd := append(sshParts, remoteTmuxCmd)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	cmd := exec.CommandContext(ctx, fullCmd[0], fullCmd[1:]...)
 	output, err := cmd.Output()
 	if err != nil {
-		return nil // Silently fail for remote connections
+		return nil
 	}
 
-	rows, err := parseTmuxOutput(string(output))
-	if err != nil {
-		return nil // Silently fail for parsing errors
+	var agents []RegistryEntry
+	if err := json.Unmarshal(output, &agents); err != nil {
+		return nil
 	}
 
-	return rows
+	return agents
 }
 
-// expandSSHKey expands ~ in SSH key paths
-func expandSSHKey(path string) string {
-	if strings.HasPrefix(path, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, path[2:])
-		}
-	}
-	return path
+// RegistryEntry represents a registered agent (matches msg-ssh structure)
+type RegistryEntry struct {
+	Name      string `json:"name"`
+	AgentType string `json:"agent_type"`
+	Directory string `json:"directory"`
+	Machine   string `json:"machine"`
 }
 
 // isTmuxRunning checks if tmux server is accessible
