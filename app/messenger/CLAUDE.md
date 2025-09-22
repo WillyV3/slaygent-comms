@@ -1,109 +1,48 @@
 # Slaygent Messenger
 
-CLI tool for inter-agent messaging via tmux panes.
+CLI messaging tool for AI agents via tmux panes with SQLite persistence.
 
-## Build & Usage
+## Quick Commands
 ```bash
-go build -o msg
-msg <agent_name> "message"
-msg --from <sender> <receiver> "response"
-msg --status
+msg <agent> "message"              # Send message
+msg --from <sender> <target> "reply"  # Tracked response
+msg --status                       # Show all agents
 ```
 
+## Message Flow
+```
+CLI → Registry Lookup → SQLite Log → Tmux Delivery → Agent Terminal
+```
+
+## Core Features
+- **Registry-based routing** - Automatic sender detection from working directory
+- **SQLite persistence** - Full conversation history with timestamps
+- **Protocol formatting** - Structured messages with response instructions
+- **Cross-machine support** - Works with `msg-ssh` for remote agents
+
+## Data Storage
+- **Registry**: `~/.slaygent/registry.json` - Agent discovery
+- **Messages**: `~/.slaygent/messages.db` - Conversation history
+- **Schema**: conversations ↔ messages (1:many relationship)
+
 ## Message Protocol
-Incoming format:
+Received format:
 ```
 {Receiving msg from: <sender>} "<message>"
 {When ready to respond use: msg --from <receiver> <sender> 'response'}
 ```
 
-## Architecture Map
-```
-┌─────────────────┐     ┌──────────────────┐
-│   msg CLI       │────▶│  Registry JSON   │
-│  (msg.go)       │     │ (~/.slaygent/)   │
-└────────┬────────┘     └──────────────────┘
-         │
-         ▼
-┌─────────────────┐     ┌──────────────────┐
-│  SQLite DB      │────▶│  Agent Terminal  │
-│ (messages.db)   │     │  (tmux pane)     │
-└─────────────────┘     └──────────────────┘
-```
-
-## Components
-- **msg.go** - CLI interface, registry-based sender detection
-- **Database** - SQLite at `~/.slaygent/messages.db`
-- **Registry** - JSON at `~/.slaygent/registry.json`
-
-## Message Flow & Data Pipeline
-```
-1. SEND:   msg <agent> "text"
-           ↓
-2. DETECT: Registry lookup (sender from cwd)
-           ↓
-3. STORE:  SQLite (conversation + message)
-           ↓
-4. ROUTE:  Find agent tmux pane
-           ↓
-5. DELIVER: Send to pane with protocol format
-```
-
-## Database Schema
-```sql
-conversations: id, agent1_name, agent2_name, last_message_at
-messages: id, conversation_id, sender_name, receiver_name, message, sent_at
-```
-
-## Development Tips - Database Inspection
+## Database Debug
 ```bash
-# Open the message database
 sqlite3 ~/.slaygent/messages.db
-
-# Useful SQLite commands:
-.tables                    # List all tables
-.schema messages          # Show table structure
-.headers on               # Show column names
-.mode column              # Pretty output
-
-# View recent messages
-SELECT * FROM messages ORDER BY sent_at DESC LIMIT 10;
-
-# Check conversations
-SELECT * FROM conversations;
-
-# Debug specific agent messages
-SELECT sender_name, receiver_name, message, datetime(sent_at, 'localtime')
-FROM messages WHERE sender_name='test-agent' OR receiver_name='test-agent';
-
-# Exit SQLite
-.quit
+.headers on; .mode column
+SELECT * FROM messages ORDER BY sent_at DESC LIMIT 5;
 ```
 
-## Key Features
-- **Registry-based sender detection** - No tmux dependency for basic messaging
-- **Directory-independent messaging** - Works after first contact established
-- **Full conversation history tracking** - Persistent SQLite storage
-- **Automatic agent discovery** - Integration with TUI manager
-- **Protocol transparency** - Clear message format for AI agents
-
-## Integration with TUI Manager
-- Messages viewable in tabbed help system (`slay` → `?` → Messaging tab)
-- Real-time conversation management via TUI (`slay` → `m`)
-- Registry synchronization for agent discovery
-- Delete conversations through TUI interface
-
-## Color System
-- ANSI 256 colors for agent names
-- Hash-based consistent assignment
-- Vibrant distinct colors per agent
-
-## Troubleshooting
-Use the TUI help system (`slay` → `?` → Messaging tab) for comprehensive troubleshooting guides, or check the following:
-
-- **Agent not found**: Verify with `msg --status` or check TUI registry
-- **Messages not delivering**: Ensure tmux pane accessibility
-- **Database issues**: Check permissions on `~/.slaygent/messages.db`
+## Integration
+- **TUI Manager**: Message history via `slay` → `m`
+- **SSH Support**: Remote agents via `msg-ssh`
+- **Registry Sync**: Auto-discovery in distributed environments
 
 <!-- SLAYGENT-REGISTRY-START -->
 # Inter-Agent Communication

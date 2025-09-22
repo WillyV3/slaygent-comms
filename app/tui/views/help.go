@@ -53,6 +53,7 @@ func NewHelpModel(width, height int) (*HelpModel, error) {
 		{Name: "Registering", File: "help-docs/registering.md"},
 		{Name: "Syncing", File: "help-docs/Syncing.md"},
 		{Name: "Inter-Agent Messaging", File: "help-docs/messaging.md"},
+		{Name: "SSH Stuff", File: "help-docs/ssh-stuff.md"},
 		{Name: "Messages", File: "help-docs/stored-convos.md"},
 		{Name: "About", File: "help-docs/about.md"},
 	}
