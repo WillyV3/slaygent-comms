@@ -357,9 +357,9 @@ const (
 func BuildBubbleTable(rows [][]string, registry interface{ GetName(string, string) string }, width int) table.Model {
 	// Define columns with flex capabilities for better responsive layout
 	columns := []table.Column{
-		table.NewColumn(columnKeyPane, "PANE", 8).WithStyle(
+		table.NewFlexColumn(columnKeyPane, "PANE", 2).WithStyle(
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#9B59B6")).Align(lipgloss.Center)),
-		table.NewFlexColumn(columnKeyDirectory, "DIRECTORY", 2).WithStyle(
+		table.NewFlexColumn(columnKeyDirectory, "DIRECTORY", 3).WithStyle(
 			lipgloss.NewStyle().Align(lipgloss.Left)),
 		table.NewColumn(columnKeyAgent, "AGENT", 8).WithStyle(
 			lipgloss.NewStyle().Align(lipgloss.Center)),
