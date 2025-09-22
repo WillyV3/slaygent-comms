@@ -93,10 +93,6 @@ func getRemoteTmuxPanes(sshRegistry *SSHRegistry) [][]string {
 
 		// Convert registered agents to display rows
 		for _, regAgent := range remoteRegistry {
-			// Skip agents that have Mac-style paths (cross-contamination)
-			if strings.Contains(regAgent.Directory, "/Users/williamvansickleiii") {
-				continue
-			}
 
 			// Create display row for registered agent
 			row := []string{
