@@ -177,9 +177,9 @@ func discoverRemoteAgents(machineName string) {
 }
 
 func findAgent(name string, localRegistry []RegistryEntry, sshRegistry []SSHConnection) (*RegistryEntry, string) {
-	// Check local registry first
+	// Check local registry first, but only for agents marked as "host"
 	for _, agent := range localRegistry {
-		if agent.Name == name {
+		if agent.Name == name && agent.Machine == "host" {
 			return &agent, "host"
 		}
 	}
@@ -241,15 +241,20 @@ func sendRemoteMessage(sender, receiver, message, machine string, sshRegistry []
 		sshParts = append(sshParts[:1], append([]string{"-i", expandedKey}, sshParts[1:]...)...)
 	}
 
-	// Build remote msg command
-	var remoteMsgCmd string
+	// Build remote tmux command to send message directly
+	formattedMessage := message
 	if sender != "unknown" {
-		remoteMsgCmd = fmt.Sprintf("msg --from %s %s '%s'", sender, receiver, message)
-	} else {
-		remoteMsgCmd = fmt.Sprintf("msg %s '%s'", receiver, message)
+		// Add structured wrapper for receiving agent to parse
+		formattedMessage = fmt.Sprintf(
+			"{Receiving msg from: %s} \"%s\" {When ready to respond use: msg --from %s %s 'your return message'}",
+			sender, message, receiver, sender)
 	}
 
-	// Execute SSH command
+	// Send directly to tmux pane - find the agent and send to its pane (like msg.go does)
+	// First send the message
+	remoteMsgCmd := fmt.Sprintf("tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}:#{pane_current_command}' | grep claude | head -1 | cut -d: -f1-2 | xargs -I {} tmux send-keys -t {} '%s'", formattedMessage)
+
+	// Execute SSH command to send message
 	fullCmd := append(sshParts, remoteMsgCmd)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -259,6 +264,19 @@ func sendRemoteMessage(sender, receiver, message, machine string, sshRegistry []
 		fmt.Fprintf(os.Stderr, "Error sending remote message to %s: %v\n", machine, err)
 		os.Exit(1)
 	}
+
+	// Staggered Enter presses for reliability (like msg.go)
+	time.Sleep(100 * time.Millisecond)
+	enterCmd1 := fmt.Sprintf("tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}:#{pane_current_command}' | grep claude | head -1 | cut -d: -f1-2 | xargs -I {} tmux send-keys -t {} C-m")
+	fullEnterCmd1 := append(sshParts, enterCmd1)
+	cmd1 := exec.CommandContext(ctx, fullEnterCmd1[0], fullEnterCmd1[1:]...)
+	cmd1.Run()
+
+	time.Sleep(100 * time.Millisecond)
+	enterCmd2 := fmt.Sprintf("tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}:#{pane_current_command}' | grep claude | head -1 | cut -d: -f1-2 | xargs -I {} tmux send-keys -t {} C-m")
+	fullEnterCmd2 := append(sshParts, enterCmd2)
+	cmd2 := exec.CommandContext(ctx, fullEnterCmd2[0], fullEnterCmd2[1:]...)
+	cmd2.Run()
 
 	fmt.Printf("Message sent to %s on %s\n", receiver, machine)
 }

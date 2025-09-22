@@ -1,0 +1,10 @@
+[
+  {
+    "session_id": "cacc1312-eeba-4eb3-b4ed-ef9369992bd0",
+    "transcript_path": "/Users/williamvansickleiii/.claude/projects/-Users-williamvansickleiii-charmtuitemplate-slaygent-comms/cacc1312-eeba-4eb3-b4ed-ef9369992bd0.jsonl",
+    "cwd": "/Users/williamvansickleiii/charmtuitemplate/slaygent-comms/app/msg-ssh",
+    "permission_mode": "acceptEdits",
+    "hook_event_name": "Stop",
+    "stop_hook_active": false
+  }
+]
