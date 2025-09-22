@@ -373,12 +373,26 @@ func (m model) refreshAll() model {
 		}
 	} else {
 		m.rows = rows
-		// Auto-adopt remote agent registrations
+		// Auto-adopt remote agent registrations (only if not present locally)
 		if m.registry != nil && m.sshRegistry != nil {
 			for _, conn := range m.sshRegistry.GetConnections() {
 				remoteAgents := queryRemoteRegistry(conn)
 				for _, agent := range remoteAgents {
-					if !m.registry.IsRegistered(agent.AgentType, agent.Directory) {
+					// Skip agents that have Mac-style paths (these are from when Mac connected to Linux)
+					if strings.Contains(agent.Directory, "/Users/williamvansickleiii") {
+						continue // Skip this - it's a Mac path in the Linux registry
+					}
+
+					// Only adopt if agent doesn't exist locally AND isn't already registered for this machine
+					isLocalAgent := false
+					for _, row := range rows {
+						if len(row) >= 6 && row[2] == agent.AgentType && row[1] == agent.Directory && row[5] == "host" {
+							isLocalAgent = true
+							break
+						}
+					}
+
+					if !isLocalAgent && !m.registry.IsRegisteredWithMachine(agent.AgentType, agent.Directory, conn.Name) {
 						m.registry.RegisterWithMachine(agent.Name, agent.AgentType, agent.Directory, conn.Name)
 					}
 				}
