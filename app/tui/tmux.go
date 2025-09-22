@@ -120,7 +120,7 @@ func expandSSHKey(path string) string {
 }
 
 // queryRemoteRegistry gets registered agents from remote machine (copied from msg-ssh)
-func queryRemoteRegistry(conn SSHConnection) []RegistryEntry {
+func queryRemoteRegistry(conn SSHConnection) []RegisteredAgent {
 	// Build SSH command to query remote registry
 	sshParts := strings.Fields(conn.ConnectCommand)
 	if len(sshParts) == 0 {
@@ -146,7 +146,7 @@ func queryRemoteRegistry(conn SSHConnection) []RegistryEntry {
 		return nil
 	}
 
-	var agents []RegistryEntry
+	var agents []RegisteredAgent
 	if err := json.Unmarshal(output, &agents); err != nil {
 		return nil
 	}
@@ -154,13 +154,7 @@ func queryRemoteRegistry(conn SSHConnection) []RegistryEntry {
 	return agents
 }
 
-// RegistryEntry represents a registered agent (matches msg-ssh structure)
-type RegistryEntry struct {
-	Name      string `json:"name"`
-	AgentType string `json:"agent_type"`
-	Directory string `json:"directory"`
-	Machine   string `json:"machine"`
-}
+// Removed duplicate RegistryEntry - using existing RegisteredAgent struct
 
 // isTmuxRunning checks if tmux server is accessible
 func isTmuxRunning(ctx context.Context) bool {
