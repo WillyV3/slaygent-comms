@@ -134,4 +134,4 @@ done <<< "$CLAUDE_FILES"
 
 echo ""
 echo "Registry sync complete!"
-echo "All files have been updated with registry reference: $REGISTRY_PATH"
+echo "All files have been updated with portable registry reference: ~/.slaygent/registry.json"

@@ -258,26 +258,61 @@ func findSyncScript(scriptName string) string {
 		return relativePath
 	}
 
-	// Dynamic Homebrew Cellar detection (most robust for Linux)
-	cellarBase := "/home/linuxbrew/.linuxbrew/Cellar/slaygent-comms"
-	if entries, err := os.ReadDir(cellarBase); err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() {
-				dynamicPath := filepath.Join(cellarBase, entry.Name(), "libexec", scriptName)
-				if _, err := os.Stat(dynamicPath); err == nil {
-					return dynamicPath
+	// Try dynamic Homebrew prefix detection first
+	if brewPrefix := getHomebrewPrefix(); brewPrefix != "" {
+		brewPaths := []string{
+			filepath.Join(brewPrefix, "lib", "slaygent-comms", scriptName),                         // lib location
+			filepath.Join(brewPrefix, "Cellar", "slaygent-comms", "*", "libexec", scriptName),     // cellar location with wildcard
+		}
+
+		for _, brewPath := range brewPaths {
+			// Handle wildcard in cellar path
+			if strings.Contains(brewPath, "*") {
+				cellarBase := filepath.Join(brewPrefix, "Cellar", "slaygent-comms")
+				if entries, err := os.ReadDir(cellarBase); err == nil {
+					for _, entry := range entries {
+						if entry.IsDir() {
+							dynamicPath := filepath.Join(cellarBase, entry.Name(), "libexec", scriptName)
+							if _, err := os.Stat(dynamicPath); err == nil {
+								return dynamicPath
+							}
+						}
+					}
+				}
+			} else {
+				if _, err := os.Stat(brewPath); err == nil {
+					return brewPath
 				}
 			}
 		}
 	}
 
-	// Try Homebrew libexec locations for different platforms
+	// Fallback to hardcoded common locations
 	possiblePaths := []string{
 		"/opt/homebrew/lib/slaygent-comms/" + scriptName,                                           // macOS ARM Homebrew
 		"/usr/local/lib/slaygent-comms/" + scriptName,                                              // macOS Intel Homebrew
 		"/home/linuxbrew/.linuxbrew/lib/slaygent-comms/" + scriptName,                              // Linux Homebrew (lib)
-		"/home/linuxbrew/.linuxbrew/Cellar/slaygent-comms/0.1.0/libexec/" + scriptName,            // Linux Homebrew (Cellar - fallback)
 		"/usr/lib/slaygent-comms/" + scriptName,                                                    // System install
+	}
+
+	// Dynamic version detection for Cellar paths (no hardcoded versions)
+	cellarBases := []string{
+		"/opt/homebrew/Cellar/slaygent-comms",                                                      // macOS ARM
+		"/usr/local/Cellar/slaygent-comms",                                                         // macOS Intel
+		"/home/linuxbrew/.linuxbrew/Cellar/slaygent-comms",                                         // Linux
+	}
+
+	for _, cellarBase := range cellarBases {
+		if entries, err := os.ReadDir(cellarBase); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					dynamicPath := filepath.Join(cellarBase, entry.Name(), "libexec", scriptName)
+					if _, err := os.Stat(dynamicPath); err == nil {
+						return dynamicPath
+					}
+				}
+			}
+		}
 	}
 
 	for _, path := range possiblePaths {
@@ -288,6 +323,16 @@ func findSyncScript(scriptName string) string {
 
 	// Fallback to relative path (will fail but with clear error)
 	return relativePath
+}
+
+// getHomebrewPrefix returns the Homebrew prefix if brew is available
+func getHomebrewPrefix() string {
+	cmd := exec.Command("brew", "--prefix")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
 }
 
 // runSyncCommand executes the sync script

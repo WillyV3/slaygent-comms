@@ -102,7 +102,7 @@ while IFS= read -r CLAUDE_FILE; do
         sed -i.bak "/$MARKER_START/,/$MARKER_END/c\\
 $MARKER_START\\
 # Inter-Agent Communication\\
-@$REGISTRY_PATH\\
+@~/.slaygent/registry.json\\
 \\
 To send messages to other coding agents, use: \`msg <agent_name> \"<message>\"\`\\
 Example: \`msg backend-dev \"Please update the API endpoint\"\`\\
@@ -121,7 +121,7 @@ $MARKER_END" "$CLAUDE_FILE"
 
 $MARKER_START
 # Inter-Agent Communication
-@$REGISTRY_PATH
+@~/.slaygent/registry.json
 
 To send messages to other coding agents, use: \`msg <agent_name> "<message>"\`
 Example: \`msg backend-dev "Please update the API endpoint"\`
@@ -140,4 +140,4 @@ done <<< "$CLAUDE_FILES"
 
 echo ""
 echo "Registry sync complete!"
-echo "All files have been updated with registry reference: $REGISTRY_PATH"
+echo "All files have been updated with portable registry reference: ~/.slaygent/registry.json"
