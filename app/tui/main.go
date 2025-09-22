@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/evertras/bubble-table/table"
 	"slaygent-manager/history"
 	"slaygent-manager/views"
@@ -22,9 +23,10 @@ type model struct {
 	table       table.Model  // Changed to bubble-table Model
 	rows        [][]string
 	registry    *Registry
+	sshRegistry *SSHRegistry
 	inputMode   bool   // Are we in input mode?
 	inputBuffer string // What the user is typing
-	inputTarget string // What we're inputting for (e.g., "register", "sync")
+	inputTarget string // What we're inputting for (e.g., "register", "sync", "ssh-name", "ssh-key", "ssh-key-picker", "ssh-command")
 	syncConfirm bool   // Are we in sync confirmation mode?
 	syncing     bool   // Are we currently syncing?
 	syncMessage string // Message to show after sync completes
@@ -45,6 +47,20 @@ type model struct {
 
 	// Help view
 	helpModel *views.HelpModel
+
+	// SSH connection being built
+	tempSSHName    string
+	tempSSHKey     string
+	tempSSHCommand string
+
+	// SSH key selection
+	sshKeys         []string
+	selectedSSHKey  int
+
+	// SSH connections view
+	sshSelectedIndex int
+	sshDeleteConfirm bool
+	sshDeleteTarget  int
 
 	width       int // Terminal width
 	height      int // Terminal height
@@ -68,6 +84,38 @@ func (m model) initializeSyncComponents() model {
 	return m
 }
 
+// getSSHKeys returns a list of SSH key files from ~/.ssh directory
+func getSSHKeys() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return []string{}
+	}
+
+	sshDir := filepath.Join(home, ".ssh")
+	files, err := os.ReadDir(sshDir)
+	if err != nil {
+		return []string{}
+	}
+
+	var keys []string
+	for _, file := range files {
+		if !file.IsDir() {
+			name := file.Name()
+			// Include only private SSH keys (exclude .pub files and other non-key files)
+			if !strings.HasSuffix(name, ".pub") &&  // Exclude public keys
+			   !strings.HasSuffix(name, ".old") &&  // Exclude backup files
+			   name != "config" &&                  // Exclude SSH config
+			   name != "known_hosts" &&             // Exclude known hosts
+			   name != "authorized_keys" &&         // Exclude authorized keys
+			   (strings.HasSuffix(name, ".pem") ||  // Include .pem private keys
+			    strings.HasSuffix(name, ".key") ||  // Include .key private keys
+			    !strings.Contains(name, ".")) {     // Include keys without extensions (common for SSH)
+				keys = append(keys, filepath.Join(sshDir, name))
+			}
+		}
+	}
+	return keys
+}
 
 type refreshMsg struct{}
 type syncCompleteMsg struct{
@@ -103,6 +151,29 @@ func (m model) View() string {
 		})
 	}
 
+	// Show SSH connections view if active
+	if m.viewMode == "ssh_connections" {
+		connections := []views.SSHConnection{}
+		if m.sshRegistry != nil {
+			for _, conn := range m.sshRegistry.GetConnections() {
+				connections = append(connections, views.SSHConnection{
+					Name:           conn.Name,
+					SSHKey:         conn.SSHKey,
+					ConnectCommand: conn.ConnectCommand,
+				})
+			}
+		}
+
+		return views.RenderSSHConnectionsView(views.SSHConnectionsViewData{
+			Connections:   connections,
+			SelectedIndex: m.sshSelectedIndex,
+			DeleteConfirm: m.sshDeleteConfirm,
+			DeleteTarget:  m.sshDeleteTarget,
+			Width:         m.width,
+			Height:        m.height,
+		})
+	}
+
 	// Show messages view if active
 	if m.viewMode == "messages" {
 		return views.RenderMessagesView(views.MessagesViewData{
@@ -117,13 +188,60 @@ func (m model) View() string {
 		})
 	}
 
+	// Show SSH key selector if active
+	if m.inputTarget == "ssh-key-picker" {
+		title := fmt.Sprintf("Select SSH Key for '%s'", m.tempSSHName)
+		instructions := "↑/↓: navigate • Enter: select • Esc: cancel"
+
+		titleStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#87CEEB")).
+			Bold(true).
+			Margin(1, 0)
+
+		instructionsStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888888")).
+			Margin(0, 0, 1, 0)
+
+		content := titleStyle.Render(title) + "\n" +
+			instructionsStyle.Render(instructions) + "\n"
+
+		if len(m.sshKeys) == 0 {
+			content += lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FF6B6B")).
+				Render("No SSH keys found in ~/.ssh directory")
+		} else {
+			for i, key := range m.sshKeys {
+				keyName := filepath.Base(key)
+				if i == m.selectedSSHKey {
+					content += lipgloss.NewStyle().
+						Background(lipgloss.Color("#87CEEB")).
+						Foreground(lipgloss.Color("#000000")).
+						Render("> " + keyName) + "\n"
+				} else {
+					content += "  " + keyName + "\n"
+				}
+			}
+		}
+
+		return content
+	}
+
 	// Show agents view
+	sshConnCount := 0
+	if m.sshRegistry != nil {
+		sshConnCount = len(m.sshRegistry.GetConnections())
+	}
+
 	return views.RenderAgentsView(views.AgentsViewData{
 		Table:         m.table,
 		Rows:          m.rows,
 		Registry:      m.registry,
+		SSHConnCount:  sshConnCount,
 		InputMode:     m.inputMode,
 		InputBuffer:   m.inputBuffer,
+		InputTarget:   m.inputTarget,
+		TempSSHName:   m.tempSSHName,
+		TempSSHKey:    m.tempSSHKey,
 		SyncConfirm:   m.syncConfirm,
 		Syncing:       m.syncing,
 		SyncMessage:   m.syncMessage,
@@ -241,12 +359,12 @@ func syncTickCmd() tea.Cmd {
 
 // refreshAll refreshes tmux data, syncs registry, and rebuilds table
 func (m model) refreshAll() model {
-	// Get fresh tmux data
-	rows, err := getTmuxPanes(m.registry)
+	// Get fresh tmux data from local and remote machines
+	rows, err := getTmuxPanesWithSSH(m.registry, m.sshRegistry)
 	if err != nil {
 		m.rows = [][]string{
-			{"ERROR", "No tmux server", "unknown", "tmux-error", "error", "✗"},
-			{"", "Run 'tmux new' to start", "", "", "", ""},
+			{"ERROR", "No tmux server", "unknown", "tmux-error", "error", "host", "✗"},
+			{"", "Run 'tmux new' to start", "", "", "", "", ""},
 		}
 	} else {
 		m.rows = rows
@@ -271,13 +389,21 @@ func main() {
 		registry = nil
 	}
 
-	// Get  tmux data
-	rows, err := getTmuxPanes(registry)
+	// Initialize SSH registry
+	sshRegistry, err := NewSSHRegistry()
+	if err != nil {
+		fmt.Printf("Warning: Failed to initialize SSH registry: %v\n", err)
+		// Continue without SSH registry
+		sshRegistry = nil
+	}
+
+	// Get tmux data from local and remote machines
+	rows, err := getTmuxPanesWithSSH(registry, sshRegistry)
 	if err != nil {
 		// Show error state with helpful message
 		rows = [][]string{
-			{"ERROR", "No tmux server running", "unknown", "tmux-error", "error", "✗"},
-			{"HELP", "Run 'tmux new' to start", "", "", "", ""},
+			{"ERROR", "No tmux server running", "unknown", "tmux-error", "error", "host", "✗"},
+			{"HELP", "Run 'tmux new' to start", "", "", "", "", ""},
 		}
 	}
 
@@ -309,14 +435,15 @@ func main() {
 	vp := viewport.New(80, 20)
 
 	m := model{
-		rows:     rows,
-		registry: registry,
-		progress: prog,
-		viewMode: "agents",
+		rows:        rows,
+		registry:    registry,
+		sshRegistry: sshRegistry,
+		progress:    prog,
+		viewMode:    "agents",
 		historyModel: historyModel,
 		messagesViewport: vp,
-		width:    120,  // Default width, will be updated by WindowSizeMsg
-		height:   30,   // Default height, will be updated by WindowSizeMsg
+		width:       120,  // Default width, will be updated by WindowSizeMsg
+		height:      30,   // Default height, will be updated by WindowSizeMsg
 	}
 	m.table = views.BuildBubbleTable(m.rows, m.registry, m.width)
 	defer func() {

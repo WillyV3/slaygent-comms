@@ -90,6 +90,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Rebuild table with new width for flex columns
 		m.table = views.BuildBubbleTable(m.rows, m.registry, m.width)
+
+
 		return m, nil
 	case syncTickMsg:
 		if m.syncing && m.progress.Percent() < 1.0 {
@@ -136,31 +138,111 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle SSH key selection mode
+		if m.inputTarget == "ssh-key-picker" {
+			switch msg.String() {
+			case "up":
+				if m.selectedSSHKey > 0 {
+					m.selectedSSHKey--
+				}
+			case "down":
+				if m.selectedSSHKey < len(m.sshKeys)-1 {
+					m.selectedSSHKey++
+				}
+			case "enter":
+				// Select the current SSH key and move to command input
+				if len(m.sshKeys) > 0 && m.selectedSSHKey < len(m.sshKeys) {
+					m.tempSSHKey = m.sshKeys[m.selectedSSHKey]
+					m.inputMode = true
+					m.inputBuffer = ""
+					m.inputTarget = "ssh-command"
+				}
+			case "esc":
+				// Cancel SSH registration
+				m.inputMode = false
+				m.inputTarget = ""
+				m.tempSSHName = ""
+				m.tempSSHKey = ""
+				m.tempSSHCommand = ""
+			}
+			return m, nil
+		}
+
 		// Handle input mode first
 		if m.inputMode {
 			switch msg.String() {
 			case "enter":
-				// Save the registration with the entered name
-				selectedRowIndex := m.table.GetHighlightedRowIndex()
-				if m.inputBuffer != "" && selectedRowIndex >= 0 && selectedRowIndex < len(m.rows) {
-					row := m.rows[selectedRowIndex]
-					if len(row) >= 3 {
-						agentType := row[2]  // AGENT column
-						fullDirectory := row[1]  // DIRECTORY column (full path)
-						m.registry.Register(m.inputBuffer, agentType, fullDirectory)
+				// Handle different input targets
+				switch m.inputTarget {
+				case "register":
+					// Save agent registration with the entered name
+					selectedRowIndex := m.table.GetHighlightedRowIndex()
+					if m.inputBuffer != "" && selectedRowIndex >= 0 && selectedRowIndex < len(m.rows) {
+						row := m.rows[selectedRowIndex]
+						if len(row) >= 7 {  // Make sure we have machine column
+							agentType := row[2]     // AGENT column
+							fullDirectory := row[1] // DIRECTORY column (full path)
+							machine := row[5]       // MACHINE column
+							// Use RegisterWithMachine for both local and remote agents
+							m.registry.RegisterWithMachine(m.inputBuffer, agentType, fullDirectory, machine)
+						}
 					}
+					// Exit input mode
+					m.inputMode = false
+					m.inputBuffer = ""
+					m.inputTarget = ""
+					// Refresh everything
+					m = m.refreshAll()
+
+				case "ssh-name":
+					// Save machine name and move to SSH key picker
+					if m.inputBuffer != "" {
+						m.tempSSHName = m.inputBuffer
+						m.inputBuffer = ""
+						m.inputTarget = "ssh-key-picker"
+						// Load SSH keys
+						m.sshKeys = getSSHKeys()
+						m.selectedSSHKey = 0
+						m.inputMode = false  // No text input for key selection
+					}
+
+				case "ssh-key-picker":
+					// SSH key selection completed, move to command input
+					if len(m.sshKeys) > 0 && m.selectedSSHKey < len(m.sshKeys) {
+						m.tempSSHKey = m.sshKeys[m.selectedSSHKey]
+					}
+					m.inputMode = true
+					m.inputBuffer = ""
+					m.inputTarget = "ssh-command"
+
+				case "ssh-command":
+					// Save SSH connection and exit input mode
+					if m.inputBuffer != "" {
+						m.tempSSHCommand = m.inputBuffer
+						// Save the complete SSH connection
+						if m.sshRegistry != nil {
+							m.sshRegistry.AddConnection(m.tempSSHName, m.tempSSHKey, m.tempSSHCommand)
+							// Refresh agents table to show new remote agents
+							m = m.refreshAll()
+						}
+						// Clear temp fields
+						m.tempSSHName = ""
+						m.tempSSHKey = ""
+						m.tempSSHCommand = ""
+					}
+					// Exit input mode
+					m.inputMode = false
+					m.inputBuffer = ""
+					m.inputTarget = ""
 				}
-				// Exit input mode
-				m.inputMode = false
-				m.inputBuffer = ""
-				m.inputTarget = ""
-				// Refresh everything
-				m = m.refreshAll()
 			case "esc":
-				// Cancel input mode
+				// Cancel input mode and clear temp SSH fields
 				m.inputMode = false
 				m.inputBuffer = ""
 				m.inputTarget = ""
+				m.tempSSHName = ""
+				m.tempSSHKey = ""
+				m.tempSSHCommand = ""
 			case "backspace", "delete":
 				if len(m.inputBuffer) > 0 {
 					m.inputBuffer = m.inputBuffer[:len(m.inputBuffer)-1]
@@ -214,7 +296,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "esc":
 			// Return to agents view
-			if m.viewMode == "messages" || m.viewMode == "sync" || m.viewMode == "help" {
+			if m.viewMode == "messages" || m.viewMode == "sync" || m.viewMode == "help" || m.viewMode == "ssh_connections" {
+				m.viewMode = "agents"
+			}
+			return m, nil
+
+		case "x":
+			// Toggle to SSH connections view
+			if m.viewMode == "agents" {
+				m.viewMode = "ssh_connections"
+				m.sshSelectedIndex = 0
+				m.sshDeleteConfirm = false
+				m.sshDeleteTarget = 0
+			} else if m.viewMode == "ssh_connections" {
 				m.viewMode = "agents"
 			}
 			return m, nil
@@ -289,6 +383,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Pass navigation to help viewport
 				m.helpModel.UpdateViewport(msg)
 				return m, nil
+			} else if m.viewMode == "ssh_connections" {
+				// Navigate SSH connections list
+				if m.sshRegistry != nil && !m.sshDeleteConfirm {
+					connCount := len(m.sshRegistry.GetConnections())
+					if connCount > 0 && m.sshSelectedIndex > 0 {
+						m.sshSelectedIndex--
+					}
+				}
+				return m, nil
 			} else if m.viewMode == "messages" {
 				if m.messagesFocus == "conversations" {
 					// Navigate conversations in left panel
@@ -326,6 +429,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.viewMode == "help" && m.helpModel != nil {
 				// Pass navigation to help viewport
 				m.helpModel.UpdateViewport(msg)
+				return m, nil
+			} else if m.viewMode == "ssh_connections" {
+				// Navigate SSH connections list
+				if m.sshRegistry != nil && !m.sshDeleteConfirm {
+					connCount := len(m.sshRegistry.GetConnections())
+					if connCount > 0 && m.sshSelectedIndex < connCount-1 {
+						m.sshSelectedIndex++
+					}
+				}
 				return m, nil
 			} else if m.viewMode == "messages" {
 				if m.messagesFocus == "conversations" {
@@ -404,6 +516,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "d":
+			// Delete SSH connection when in ssh_connections view
+			if m.viewMode == "ssh_connections" && !m.sshDeleteConfirm {
+				if m.sshRegistry != nil {
+					connCount := len(m.sshRegistry.GetConnections())
+					if connCount > 0 && m.sshSelectedIndex < connCount {
+						m.sshDeleteConfirm = true
+						m.sshDeleteTarget = m.sshSelectedIndex
+					}
+				}
+				return m, nil
+			}
 			// Delete conversation when in messages view and conversations panel has focus
 			if m.viewMode == "messages" && m.messagesFocus == "conversations" && !m.deleteConfirm {
 				if m.historyModel != nil && m.historyModel.HasConversations() {
@@ -415,6 +538,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "y":
+			// Confirm SSH connection deletion
+			if m.sshDeleteConfirm {
+				if m.sshRegistry != nil {
+					connections := m.sshRegistry.GetConnections()
+					if m.sshDeleteTarget < len(connections) {
+						// Remove the connection
+						targetName := connections[m.sshDeleteTarget].Name
+						err := m.sshRegistry.RemoveConnection(targetName)
+						if err == nil {
+							// Adjust selection if needed
+							connCount := len(m.sshRegistry.GetConnections())
+							if m.sshSelectedIndex >= connCount && connCount > 0 {
+								m.sshSelectedIndex = connCount - 1
+							}
+							// Refresh agents table to remove stale remote agents
+							m = m.refreshAll()
+						}
+					}
+				}
+				m.sshDeleteConfirm = false
+				m.sshDeleteTarget = 0
+				return m, nil
+			}
 			// Confirm deletion
 			if m.deleteConfirm {
 				if m.historyModel != nil {
@@ -430,6 +576,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.deleteTarget = 0
 			}
 		case "n":
+			// Cancel SSH connection deletion
+			if m.sshDeleteConfirm {
+				m.sshDeleteConfirm = false
+				m.sshDeleteTarget = 0
+				return m, nil
+			}
 			// Cancel deletion
 			if m.deleteConfirm {
 				m.deleteConfirm = false
@@ -440,13 +592,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			selectedRowIndex := m.table.GetHighlightedRowIndex()
 			if selectedRowIndex >= 0 && selectedRowIndex < len(m.rows) && len(m.rows) > 0 {
 				row := m.rows[selectedRowIndex]
-				if len(row) >= 3 {
-					agentType := row[2]
-					fullDirectory := row[1]  // Full path for registry
+				if len(row) >= 7 {  // Make sure we have machine column
+					agentType := row[2]     // AGENT column
+					fullDirectory := row[1] // DIRECTORY column (full path)
+					machine := row[5]       // MACHINE column
 
-					if m.registry.IsRegistered(agentType, fullDirectory) {
+					if m.registry.IsRegisteredWithMachine(agentType, fullDirectory, machine) {
 						// Already registered, deregister it
-						m.registry.Deregister(agentType, fullDirectory)
+						m.registry.DeregisterWithMachine(agentType, fullDirectory, machine)
 						// Refresh everything
 						m = m.refreshAll()
 					} else {
@@ -456,6 +609,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.inputTarget = "register"
 					}
 				}
+			}
+		case "z":
+			// Register SSH connection - start multi-step input process (agents view only)
+			if m.viewMode == "agents" && m.sshRegistry != nil {
+				// Start SSH connection registration process
+				m.inputMode = true
+				m.inputBuffer = ""
+				m.inputTarget = "ssh-name"
+				// Clear temp SSH fields
+				m.tempSSHName = ""
+				m.tempSSHKey = ""
+				m.tempSSHCommand = ""
 			}
 		case "pgup":
 			if m.viewMode == "messages" && m.messagesFocus == "messages" {

@@ -3,13 +3,65 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
-// getTmuxPanes returns tmux pane information as a slice of row data
+// getTmuxPanes returns tmux pane information as a slice of row data from local and remote machines
 func getTmuxPanes(registry *Registry) ([][]string, error) {
+	return getTmuxPanesWithSSH(registry, nil)
+}
+
+// getTmuxPanesWithSSH returns tmux pane information from local and remote machines
+func getTmuxPanesWithSSH(registry *Registry, sshRegistry *SSHRegistry) ([][]string, error) {
+	var allRows [][]string
+
+	// Get local tmux panes
+	localRows, err := getLocalTmuxPanes()
+	if err == nil {
+		allRows = append(allRows, localRows...)
+	}
+
+	// Get remote tmux panes if SSH registry is provided
+	if sshRegistry != nil {
+		remoteRows := getRemoteTmuxPanes(sshRegistry)
+		allRows = append(allRows, remoteRows...)
+	}
+
+	// If no local tmux server and no remote data, return error
+	if len(allRows) == 0 && err != nil {
+		return nil, err
+	}
+
+	// Update registration status and name for each row
+	for i, row := range allRows {
+		if len(row) >= 7 {
+			agentType := row[2]  // AGENT column
+			directory := row[1]  // DIRECTORY column
+			machine := row[5]    // MACHINE column
+			if registry != nil {
+				if registry.IsRegisteredWithMachine(agentType, directory, machine) {
+					allRows[i][6] = "✓"  // Update REGISTERED column
+					// Replace NAME column with registered name
+					if name := registry.GetNameWithMachine(agentType, directory, machine); name != "" {
+						allRows[i][3] = name  // Update NAME column with registered name
+					}
+				} else {
+					allRows[i][6] = "✗"  // Update REGISTERED column to not registered
+					allRows[i][3] = "NR"  // Not Registered
+				}
+			}
+		}
+	}
+
+	return allRows, nil
+}
+
+// getLocalTmuxPanes gets tmux panes from the local machine
+func getLocalTmuxPanes() ([][]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -19,7 +71,6 @@ func getTmuxPanes(registry *Registry) ([][]string, error) {
 	}
 
 	// Get pane information using tmux list-panes
-	// Include both session_name and session_id to handle named sessions properly
 	format := "#{session_name}:#{session_id}:#{window_index}.#{pane_index}:#{pane_current_path}:#{pane_current_command}:#{?pane_active,active,idle}"
 	cmd := exec.CommandContext(ctx, "tmux", "list-panes", "-a", "-F", format)
 
@@ -28,32 +79,76 @@ func getTmuxPanes(registry *Registry) ([][]string, error) {
 		return nil, fmt.Errorf("failed to get tmux panes: %w", err)
 	}
 
-	rows, err := parseTmuxOutput(string(output))
-	if err != nil {
-		return nil, err
-	}
+	return parseTmuxOutput(string(output))
+}
 
-	// Update registration status and name for each row
-	for i, row := range rows {
-		if len(row) >= 6 {
-			agentType := row[2]  // AGENT column
-			directory := row[1]  // DIRECTORY column
-			if registry != nil {
-				if registry.IsRegistered(agentType, directory) {
-					rows[i][5] = "✓"  // Update REGISTERED column
-					// Replace NAME column with registered name
-					if name := registry.GetName(agentType, directory); name != "" {
-						rows[i][3] = name  // Update NAME column with registered name
-					}
-				} else {
-					rows[i][5] = "✗"  // Update REGISTERED column to not registered
-					rows[i][3] = "NR"  // Not Registered
-				}
+// getRemoteTmuxPanes gets tmux panes from all registered SSH connections
+func getRemoteTmuxPanes(sshRegistry *SSHRegistry) [][]string {
+	var allRemoteRows [][]string
+
+	for _, conn := range sshRegistry.GetConnections() {
+		remoteRows := queryRemoteTmuxPanes(conn)
+		// Add machine name to each row
+		for _, row := range remoteRows {
+			if len(row) >= 6 {
+				// Insert machine name at position 5 (between status and registered)
+				newRow := make([]string, 7)
+				copy(newRow[:5], row[:5])     // Copy pane, directory, agent, name, status
+				newRow[5] = conn.Name         // Set machine name
+				newRow[6] = row[5]           // Copy registered status
+				allRemoteRows = append(allRemoteRows, newRow)
 			}
 		}
 	}
 
-	return rows, nil
+	return allRemoteRows
+}
+
+// queryRemoteTmuxPanes queries a specific remote machine for tmux panes
+func queryRemoteTmuxPanes(conn SSHConnection) [][]string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Build SSH command
+	sshParts := strings.Fields(conn.ConnectCommand)
+	if len(sshParts) == 0 {
+		return nil
+	}
+
+	// Add SSH key if specified
+	if conn.SSHKey != "" {
+		expandedKey := expandSSHKey(conn.SSHKey)
+		sshParts = append(sshParts[:1], append([]string{"-i", expandedKey}, sshParts[1:]...)...)
+	}
+
+	// Build remote tmux command
+	format := "#{session_name}:#{session_id}:#{window_index}.#{pane_index}:#{pane_current_path}:#{pane_current_command}:#{?pane_active,active,idle}"
+	remoteTmuxCmd := fmt.Sprintf("tmux list-panes -a -F '%s' 2>/dev/null || echo ''", format)
+
+	// Execute SSH command
+	fullCmd := append(sshParts, remoteTmuxCmd)
+	cmd := exec.CommandContext(ctx, fullCmd[0], fullCmd[1:]...)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil // Silently fail for remote connections
+	}
+
+	rows, err := parseTmuxOutput(string(output))
+	if err != nil {
+		return nil // Silently fail for parsing errors
+	}
+
+	return rows
+}
+
+// expandSSHKey expands ~ in SSH key paths
+func expandSSHKey(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
 }
 
 // isTmuxRunning checks if tmux server is accessible
@@ -119,6 +214,7 @@ func parseTmuxOutput(output string) ([][]string, error) {
 			agentType,
 			displayName,    // Display session_name:window.pane
 			status,
+			"host",         // Machine name (always "host" for local tmux)
 			registered,     // Will be updated later with registry check
 		})
 	}

@@ -13,13 +13,24 @@ import (
 	"github.com/evertras/bubble-table/table"
 )
 
+// SSHConnection represents a connection to a remote machine
+type SSHConnection struct {
+	Name           string `json:"name"`
+	SSHKey         string `json:"ssh_key"`
+	ConnectCommand string `json:"connect_command"`
+}
+
 // AgentsViewData contains all data needed to render the agents view
 type AgentsViewData struct {
 	Table         table.Model  // Changed to bubble-table Model
 	Rows          [][]string
 	Registry      interface{ GetName(string, string) string }
+	SSHConnCount  int  // Number of SSH connections
 	InputMode     bool
 	InputBuffer   string
+	InputTarget   string  // What we're inputting for
+	TempSSHName   string  // Temporary SSH name during registration
+	TempSSHKey    string  // Temporary SSH key during registration
 	SyncConfirm   bool
 	Syncing       bool
 	SyncMessage   string
@@ -53,6 +64,22 @@ func RenderAgentsView(data AgentsViewData) string {
 }, "\n")
 
 
+// SSH Connection Status
+var connectionStatus string
+if data.SSHConnCount > 0 {
+	connectionStatus = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#87CEEB")).
+		Bold(true).
+		Render(fmt.Sprintf("🌐 %d SSH machine%s connected", data.SSHConnCount, func() string {
+			if data.SSHConnCount == 1 { return "" }
+			return "s"
+		}()))
+} else {
+	connectionStatus = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888")).
+		Render("🌐 No SSH machines connected")
+}
+
 // Controls with grey styling
 controlsStyle := lipgloss.NewStyle().
 	Foreground(lipgloss.Color("#888888")).
@@ -62,6 +89,8 @@ controls := controlsStyle.Render(strings.Join([]string{
 	"Getting around this page:",
 	"↑/↓ or j/k: Navigate",
 	"a: Register/unregister agent",
+	"z: Register SSH connection",
+	"x: Manage SSH connections",
 	"r: Refresh agent list",
 	"s: Sync agents/claude.md",
 	"e: Edit injected sync content",
@@ -73,7 +102,7 @@ controls := controlsStyle.Render(strings.Join([]string{
 // Use Lipgloss JoinHorizontal for proper side-by-side layout
 header := lipgloss.JoinHorizontal(
 	lipgloss.Top,    // Align to top
-	title,           // Left side: ASCII art
+	lipgloss.JoinVertical(lipgloss.Left, title, "", connectionStatus), // Left side: ASCII art + connection status
 	"        ",      // More spacing between columns
 	controls,        // Right side: controls
 )
@@ -118,17 +147,47 @@ if data.SyncMessage != "" {
 
 // Show input prompt if in input mode
 if data.InputMode {
-	// Get currently selected row from bubble-table
-	selectedRow := data.Table.GetHighlightedRowIndex()
-	if selectedRow >= 0 && selectedRow < len(data.Rows) {
-		row := data.Rows[selectedRow]
-		agentType := row[2]
-		fullDirectory := row[1]  // Full path for registry
-		displayDirectory := filepath.Base(fullDirectory)  // Short name for display
-		// Style the registration prompt in dark pink and bold
-		darkPinkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#C71585")).Bold(true)
-		registerText := fmt.Sprintf("Register %s in %s", agentType, displayDirectory)
-		prompt := "\n" + darkPinkStyle.Render(registerText) + fmt.Sprintf("\n\nName: %s_", data.InputBuffer)
+	darkPinkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#C71585")).Bold(true)
+
+	switch data.InputTarget {
+	case "register":
+		// Agent registration prompt
+		selectedRow := data.Table.GetHighlightedRowIndex()
+		if selectedRow >= 0 && selectedRow < len(data.Rows) {
+			row := data.Rows[selectedRow]
+			agentType := row[2]
+			fullDirectory := row[1]  // Full path for registry
+			displayDirectory := filepath.Base(fullDirectory)  // Short name for display
+			registerText := fmt.Sprintf("Register %s in %s", agentType, displayDirectory)
+			prompt := "\n" + darkPinkStyle.Render(registerText) + fmt.Sprintf("\n\nName: %s_", data.InputBuffer)
+			fullView := view + prompt + "\n\nPress Enter to save, Esc to cancel\n"
+			return wrapToTerminal(fullView, data.Width)
+		}
+
+	case "ssh-name":
+		// SSH machine name prompt
+		registerText := "Register SSH Connection - Step 1/3"
+		prompt := "\n" + darkPinkStyle.Render(registerText) + fmt.Sprintf("\n\nMachine name: %s_", data.InputBuffer)
+		fullView := view + prompt + "\n\nPress Enter to continue, Esc to cancel\n"
+		return wrapToTerminal(fullView, data.Width)
+
+	case "ssh-key-picker":
+		// This case should not be reached since we handle the file picker in main View()
+		// But included for completeness
+		registerText := fmt.Sprintf("Register SSH Connection '%s' - Step 2/3: Selecting SSH Key", data.TempSSHName)
+		prompt := "\n" + darkPinkStyle.Render(registerText) + "\n\nFile picker is active..."
+		fullView := view + prompt + "\n"
+		return wrapToTerminal(fullView, data.Width)
+
+	case "ssh-command":
+		// SSH connect command prompt
+		registerText := fmt.Sprintf("Register SSH Connection '%s' - Step 3/3", data.TempSSHName)
+		keyText := ""
+		if data.TempSSHKey != "" {
+			keyFileName := filepath.Base(data.TempSSHKey)
+			keyText = fmt.Sprintf(" (Key: %s)", keyFileName)
+		}
+		prompt := "\n" + darkPinkStyle.Render(registerText + keyText) + fmt.Sprintf("\n\nConnect command: %s_", data.InputBuffer)
 		fullView := view + prompt + "\n\nPress Enter to save, Esc to cancel\n"
 		return wrapToTerminal(fullView, data.Width)
 	}
@@ -290,6 +349,7 @@ const (
 	columnKeyAgent      = "agent"
 	columnKeyName       = "name"
 	columnKeyStatus     = "status"
+	columnKeyMachine    = "machine"
 	columnKeyRegistered = "registered"
 )
 
@@ -306,6 +366,8 @@ func BuildBubbleTable(rows [][]string, registry interface{ GetName(string, strin
 		table.NewFlexColumn(columnKeyName, "NAME", 3).WithStyle(
 			lipgloss.NewStyle().Align(lipgloss.Left)),
 		table.NewColumn(columnKeyStatus, "STATUS", 7).WithStyle(
+			lipgloss.NewStyle().Align(lipgloss.Center)),
+		table.NewColumn(columnKeyMachine, "MACHINE", 8).WithStyle(
 			lipgloss.NewStyle().Align(lipgloss.Center)),
 		table.NewColumn(columnKeyRegistered, "REGISTERED?", 12).WithStyle(
 			lipgloss.NewStyle().Align(lipgloss.Center)),
@@ -325,8 +387,8 @@ func BuildBubbleTable(rows [][]string, registry interface{ GetName(string, strin
 	// Convert rows to bubble-table Row format
 	tableRows := make([]table.Row, 0, len(rows))
 	for i, row := range rows {
-		if len(row) < 6 {
-			continue // Skip incomplete rows
+		if len(row) < 7 {
+			continue // Skip incomplete rows (now expecting 7 columns)
 		}
 
 		// Truncate directory to last folder name
@@ -342,7 +404,8 @@ func BuildBubbleTable(rows [][]string, registry interface{ GetName(string, strin
 			columnKeyAgent:      row[2],
 			columnKeyName:       row[3],
 			columnKeyStatus:     row[4],
-			columnKeyRegistered: row[5],
+			columnKeyMachine:    row[5],
+			columnKeyRegistered: row[6],
 		}
 
 		// Apply agent-specific styling to the AGENT column
@@ -353,19 +416,29 @@ func BuildBubbleTable(rows [][]string, registry interface{ GetName(string, strin
 		}
 
 		// Style registered names in bold blue
-		if len(row) > 5 && row[5] == "✓" {
+		if len(row) > 6 && row[6] == "✓" {
 			// Override name cell styling for registered agents
 			nameCell := table.NewStyledCell(row[3], lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#5DADE2")).Bold(true))
 			rowData[columnKeyName] = nameCell
 		}
 
+		// Style machine column with distinct colors
+		machineColor := lipgloss.Color("#87CEEB") // Default baby blue for "host"
+		if row[5] != "host" {
+			// Use different color for remote machines
+			machineColor = lipgloss.Color("#FFB347") // Orange for remote machines
+		}
+		machineCell := table.NewStyledCell(row[5], lipgloss.NewStyle().
+			Foreground(machineColor).Align(lipgloss.Center))
+		rowData[columnKeyMachine] = machineCell
+
 		// Style registered column with colors and manual centering
-		if row[5] == "✓" {
+		if row[6] == "✓" {
 			regCell := table.NewStyledCell("     ✓     ", lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#00FF00")))
 			rowData[columnKeyRegistered] = regCell
-		} else if row[5] == "✗" {
+		} else if row[6] == "✗" {
 			regCell := table.NewStyledCell("     ✗     ", lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#FF0000")))
 			rowData[columnKeyRegistered] = regCell
