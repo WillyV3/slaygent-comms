@@ -105,8 +105,8 @@ func getRemoteTmuxPanes(sshRegistry *SSHRegistry) [][]string {
 			isRegistered := false
 			for _, regAgent := range remoteRegistry {
 				if regAgent.AgentType == runningAgent.AgentType &&
-				   regAgent.Directory == runningAgent.Directory &&
-				   regAgent.Machine == conn.Name {
+				   regAgent.Directory == runningAgent.Directory {
+					// Agent matches - use the registered name regardless of machine field
 					registeredName = regAgent.Name
 					isRegistered = true
 					break
