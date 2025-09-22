@@ -20,11 +20,15 @@ Remote connections stored in `~/.slaygent/ssh-registry.json`:
 
 ## Adding SSH Connections
 
-1. Press `c` in agents view to add SSH connection
+1. Press `z` in agents view to add SSH connection
 2. Enter machine name (e.g., "homelab")
 3. Select SSH key from `~/.ssh/` directory
 4. Enter SSH connection command
 5. Connection appears in SSH connections view
+
+## SSH Manager
+
+Press `x` in agents view to enter SSH connection manager for viewing and managing existing connections.
 
 ## Remote Agent Discovery
 
