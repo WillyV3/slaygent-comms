@@ -379,7 +379,7 @@ func (m model) refreshAll() model {
 				remoteAgents := queryRemoteRegistry(conn)
 				for _, agent := range remoteAgents {
 					if !m.registry.IsRegistered(agent.AgentType, agent.Directory) {
-						m.registry.AddAgent(agent.Name, agent.AgentType, agent.Directory, conn.Name)
+						m.registry.RegisterWithMachine(agent.Name, agent.AgentType, agent.Directory, conn.Name)
 					}
 				}
 			}
