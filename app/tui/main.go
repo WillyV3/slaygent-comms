@@ -252,57 +252,16 @@ func (m model) View() string {
 
 // findSyncScript returns the path to the sync script, checking multiple locations
 func findSyncScript(scriptName string) string {
-	// Try relative path (development)
-	relativePath := "../scripts/" + scriptName
-	if _, err := os.Stat(relativePath); err == nil {
-		return relativePath
-	}
-
-	// Try dynamic Homebrew prefix detection first
+	// PRIORITY 1: Dynamic Homebrew detection (works on any machine)
 	if brewPrefix := getHomebrewPrefix(); brewPrefix != "" {
-		brewPaths := []string{
-			filepath.Join(brewPrefix, "lib", "slaygent-comms", scriptName),                         // lib location
-			filepath.Join(brewPrefix, "Cellar", "slaygent-comms", "*", "libexec", scriptName),     // cellar location with wildcard
+		// Check lib location FIRST (stable, version-independent)
+		libPath := filepath.Join(brewPrefix, "lib", "slaygent-comms", scriptName)
+		if _, err := os.Stat(libPath); err == nil {
+			return libPath
 		}
 
-		for _, brewPath := range brewPaths {
-			// Handle wildcard in cellar path
-			if strings.Contains(brewPath, "*") {
-				cellarBase := filepath.Join(brewPrefix, "Cellar", "slaygent-comms")
-				if entries, err := os.ReadDir(cellarBase); err == nil {
-					for _, entry := range entries {
-						if entry.IsDir() {
-							dynamicPath := filepath.Join(cellarBase, entry.Name(), "libexec", scriptName)
-							if _, err := os.Stat(dynamicPath); err == nil {
-								return dynamicPath
-							}
-						}
-					}
-				}
-			} else {
-				if _, err := os.Stat(brewPath); err == nil {
-					return brewPath
-				}
-			}
-		}
-	}
-
-	// Fallback to hardcoded common locations
-	possiblePaths := []string{
-		"/opt/homebrew/lib/slaygent-comms/" + scriptName,                                           // macOS ARM Homebrew
-		"/usr/local/lib/slaygent-comms/" + scriptName,                                              // macOS Intel Homebrew
-		"/home/linuxbrew/.linuxbrew/lib/slaygent-comms/" + scriptName,                              // Linux Homebrew (lib)
-		"/usr/lib/slaygent-comms/" + scriptName,                                                    // System install
-	}
-
-	// Dynamic version detection for Cellar paths (no hardcoded versions)
-	cellarBases := []string{
-		"/opt/homebrew/Cellar/slaygent-comms",                                                      // macOS ARM
-		"/usr/local/Cellar/slaygent-comms",                                                         // macOS Intel
-		"/home/linuxbrew/.linuxbrew/Cellar/slaygent-comms",                                         // Linux
-	}
-
-	for _, cellarBase := range cellarBases {
+		// Check Cellar as fallback (for older versions)
+		cellarBase := filepath.Join(brewPrefix, "Cellar", "slaygent-comms")
 		if entries, err := os.ReadDir(cellarBase); err == nil {
 			for _, entry := range entries {
 				if entry.IsDir() {
@@ -315,19 +274,54 @@ func findSyncScript(scriptName string) string {
 		}
 	}
 
-	for _, path := range possiblePaths {
+	// PRIORITY 2: Standard Homebrew locations (fallback)
+	standardPaths := []string{
+		"/opt/homebrew/Cellar/slaygent-comms",      // macOS ARM
+		"/usr/local/Cellar/slaygent-comms",         // macOS Intel
+		"/home/linuxbrew/.linuxbrew/Cellar/slaygent-comms", // Linux
+	}
+
+	for _, cellarBase := range standardPaths {
+		if entries, err := os.ReadDir(cellarBase); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					dynamicPath := filepath.Join(cellarBase, entry.Name(), "libexec", scriptName)
+					if _, err := os.Stat(dynamicPath); err == nil {
+						return dynamicPath
+					}
+				}
+			}
+		}
+	}
+
+	// PRIORITY 3: Development mode (relative path)
+	relativePath := "../scripts/" + scriptName
+	if _, err := os.Stat(relativePath); err == nil {
+		return relativePath
+	}
+
+	// PRIORITY 4: System install locations
+	systemPaths := []string{
+		"/opt/homebrew/lib/slaygent-comms/" + scriptName,
+		"/usr/local/lib/slaygent-comms/" + scriptName,
+		"/home/linuxbrew/.linuxbrew/lib/slaygent-comms/" + scriptName,
+		"/usr/lib/slaygent-comms/" + scriptName,
+	}
+
+	for _, path := range systemPaths {
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
 	}
 
-	// Fallback to relative path (will fail but with clear error)
-	return relativePath
+	// FALLBACK: Return path that will cause clear error
+	return "/usr/bin/false" // This will fail with clear error message
 }
 
 // getHomebrewPrefix returns the Homebrew prefix if brew is available
 func getHomebrewPrefix() string {
 	cmd := exec.Command("brew", "--prefix")
+	cmd.Env = os.Environ() // Ensure full environment is available
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -341,7 +335,7 @@ func (m model) runSyncCommand() tea.Cmd {
 		// Find and execute sync script
 		scriptPath := findSyncScript("sync-claude.sh")
 		cmd := exec.Command("bash", "-c", fmt.Sprintf("echo 'y' | %s", scriptPath))
-		cmd.Dir = "."
+		cmd.Dir = os.Getenv("HOME")
 		output, err := cmd.Output()
 		if err != nil {
 			return syncCompleteMsg{filesUpdated: 0}
