@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
 	"slaygent-manager/views"
 )
@@ -111,6 +113,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.progress.SetPercent(0)
 		m.syncMessage = "" // Clear the success message
 		return m, nil
+	case syncProgressLogMsg:
+		// Add log to the sync progress logs
+		m.syncProgressLogs = append(m.syncProgressLogs, msg.log)
+		return m, nil
+	case syncProgressCompleteMsg:
+		// Sync is complete
+		m.syncProgressActive = false
+		completionMsg := fmt.Sprintf("Successfully synced %d out of %d files", msg.filesUpdated, msg.totalFiles)
+		m.syncProgressLogs = append(m.syncProgressLogs, completionMsg)
+		return m, nil
+	case syncProgressErrorMsg:
+		// Sync failed
+		m.syncProgressActive = false
+		m.syncProgressError = msg.error
+		return m, nil
+	case spinner.TickMsg:
+		if m.syncProgressMode && m.syncProgressActive {
+			var cmd tea.Cmd
+			m.syncProgressSpinner, cmd = m.syncProgressSpinner.Update(msg)
+			return m, cmd
+		} else if m.filePickerMode && m.filePickerLoading {
+			var cmds []tea.Cmd
+			for i := range m.filePickerSpinners {
+				var cmd tea.Cmd
+				m.filePickerSpinners[i], cmd = m.filePickerSpinners[i].Update(msg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+			return m, tea.Batch(cmds...)
+		}
+		return m, nil
 	case progress.FrameMsg:
 		if m.syncing {
 			progressModel, cmd := m.progress.Update(msg)
@@ -118,25 +152,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m, nil
+	case fileDiscoveryMsg:
+		m.filePickerLoading = false
+		if msg.error != "" {
+			m.filePickerError = msg.error
+		} else {
+			m.discoveredFiles = msg.files
+			m.filePickerIndex = 0
+			m.filePickerError = ""
+		}
+		return m, nil
+	case fileDiscoveryTickMsg:
+		// Just for loading animation - no action needed
+		return m, nil
 	case refreshMsg:
 		// Auto-refresh disabled to prevent duplication
 		// Use manual refresh with 'r' key only
 	case tea.KeyMsg:
-		// Handle sync confirmation mode
-		if m.syncConfirm {
-			switch msg.String() {
-			case "y", "Y":
-				// Start sync with progress animation
-				m.syncConfirm = false
-				m.syncing = true
-				m.progress.SetPercent(0)
-				return m, tea.Batch(syncTickCmd(), m.runSyncCommand())
-			case "n", "N", "esc":
-				m.syncConfirm = false
-				return m, nil
-			}
-			return m, nil
-		}
+		// Sync confirmation removed - only use 'e' key for sync customization
 
 		// Handle SSH key selection mode
 		if m.inputTarget == "ssh-key-picker" {
@@ -258,6 +291,95 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle file picker mode
+		if m.filePickerMode {
+			switch msg.String() {
+			case "esc":
+				// Exit file picker and return to sync view
+				m.filePickerMode = false
+				m.discoveredFiles = nil
+				m.filePickerIndex = 0
+				m.filePickerLoading = false
+				m.filePickerError = ""
+				return m, nil
+			case "up", "k":
+				if len(m.discoveredFiles) > 0 && m.filePickerIndex > 0 {
+					m.filePickerIndex--
+				}
+				return m, nil
+			case "down", "j":
+				if len(m.discoveredFiles) > 0 && m.filePickerIndex < len(m.discoveredFiles)-1 {
+					m.filePickerIndex++
+				}
+				return m, nil
+			case " ": // Space to toggle selection
+				if len(m.discoveredFiles) > 0 && m.filePickerIndex < len(m.discoveredFiles) {
+					m.discoveredFiles = toggleFileSelection(m.discoveredFiles, m.filePickerIndex)
+				}
+				return m, nil
+			case "a", "A": // Select all
+				m.discoveredFiles = selectAllFiles(m.discoveredFiles)
+				return m, nil
+			case "n", "N": // Select none
+				m.discoveredFiles = deselectAllFiles(m.discoveredFiles)
+				return m, nil
+			case "f", "F": // Select current project files
+				cwd, _ := os.Getwd()
+				for i := range m.discoveredFiles {
+					m.discoveredFiles[i].Selected = strings.HasPrefix(m.discoveredFiles[i].Path, cwd)
+				}
+				return m, nil
+			case "enter":
+				// Execute sync on selected files
+				selectedCount := getSelectedCount(m.discoveredFiles)
+				if selectedCount > 0 {
+					// Get selected files for sync
+					selectedFiles := getSelectedFiles(m.discoveredFiles)
+
+					// Exit file picker mode and start sync progress
+					m.filePickerMode = false
+					m.syncProgressMode = true
+					m.syncProgressTitle = fmt.Sprintf("Syncing %d files", selectedCount)
+					m.syncProgressLogs = []string{}
+					m.syncProgressActive = true
+					m.syncProgressError = ""
+
+					// Initialize spinner
+					s := spinner.New()
+					s.Spinner = spinner.Dot
+					s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("62"))
+					m.syncProgressSpinner = s
+
+					return m, tea.Batch(m.syncProgressSpinner.Tick, m.runSyncProgressCommand(selectedFiles))
+				}
+				return m, nil
+			}
+			return m, nil
+		}
+
+		// Handle sync progress mode
+		if m.syncProgressMode {
+			switch msg.String() {
+			case "esc":
+				// Exit sync progress mode and return to file picker or sync view
+				m.syncProgressMode = false
+				m.syncProgressActive = false
+				m.syncProgressLogs = nil
+				m.syncProgressError = ""
+
+				// Return to file picker if files are still available
+				if len(m.discoveredFiles) > 0 {
+					m.filePickerMode = true
+				} else {
+					// Go back to sync view if no files available
+					m.viewMode = "sync"
+				}
+				return m, nil
+			}
+			// In sync progress mode, ignore other key inputs
+			return m, nil
+		}
+
 		// Normal mode key handling
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -330,20 +452,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "s":
-			if m.viewMode == "agents" {
-				// Quick sync CLAUDE.md files with registry
-				m.syncConfirm = true
-			}
-			return m, nil
+		// 's' key removed - use 'e' for sync customization only
 		case "c":
 			if m.viewMode == "sync" && m.syncMode != views.EditMode {
-				// Custom sync - switch to agents view and show progress there
-				m.syncModified = false
-				m.viewMode = "agents"  // Switch back to agents view
-				m.syncing = true
-				m.progress.SetPercent(0)
-				return m, tea.Batch(syncTickCmd(), m.runCustomSyncCommand())
+				// Start file picker for custom sync
+				m.filePickerMode = true
+				m.filePickerLoading = true
+				m.filePickerError = ""
+				m.discoveredFiles = nil
+				m.filePickerIndex = 0
+
+				// Initialize 7 different spinners for file discovery
+				spinnerTypes := []spinner.Spinner{
+					spinner.Dot,
+					spinner.Line,
+					spinner.MiniDot,
+					spinner.Jump,
+					spinner.Pulse,
+					spinner.Points,
+					spinner.Globe,
+				}
+
+				colors := []string{"62", "196", "214", "34", "99", "208", "165"}
+
+				m.filePickerSpinners = make([]spinner.Model, 7)
+				var spinnerCmds []tea.Cmd
+
+				for i := 0; i < 7; i++ {
+					s := spinner.New()
+					s.Spinner = spinnerTypes[i]
+					s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(colors[i]))
+					m.filePickerSpinners[i] = s
+					spinnerCmds = append(spinnerCmds, m.filePickerSpinners[i].Tick)
+				}
+
+				// Add the file discovery command
+				spinnerCmds = append(spinnerCmds, m.discoverFilesCommand())
+
+				return m, tea.Batch(spinnerCmds...)
 			}
 			return m, nil
 		case "left":

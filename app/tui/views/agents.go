@@ -31,7 +31,6 @@ type AgentsViewData struct {
 	InputTarget   string  // What we're inputting for
 	TempSSHName   string  // Temporary SSH name during registration
 	TempSSHKey    string  // Temporary SSH key during registration
-	SyncConfirm   bool
 	Syncing       bool
 	SyncMessage   string
 	Progress      progress.Model
@@ -92,8 +91,7 @@ controls := controlsStyle.Render(strings.Join([]string{
 	"z: Register SSH connection",
 	"x: Manage SSH connections",
 	"r: Refresh agent list",
-	"s: Sync agents/claude.md",
-	"e: Edit injected sync content",
+	"e: Sync customization (file picker)",
 	"m: View Message History",
 	"?: Learn how to use Slaygent",
 	"q or Ctrl+C: Quit",
@@ -124,12 +122,6 @@ if !data.InputMode {
 }
 
 view := "\n" + header + "\n\n" + tableTitle + "\n\n" + data.Table.View() + "\n\n" + tableSubtitle + "\n"
-
-// Show sync confirmation prompt
-if data.SyncConfirm {
-	fullView := view + "\nSync registry to all CLAUDE.md files? (y/N): "
-	return wrapToTerminal(fullView, data.Width)
-}
 
 // Show sync progress or success message
 if data.Syncing {

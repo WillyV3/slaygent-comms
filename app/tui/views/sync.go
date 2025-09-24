@@ -37,7 +37,7 @@ const (
 
 // Default registry clause template - content only (markers added by script)
 const DefaultRegistryClause = `# Inter-Agent Communication
-@/Users/williamvansickleiii/.slaygent/registry.json
+@~/.slaygent/registry.json
 
 To send messages to other coding agents, use: ` + "`msg <agent_name> \"<message>\"`" + `
 Example: ` + "`msg backend-dev \"Please update the API endpoint\"`" + `

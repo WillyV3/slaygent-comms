@@ -46,7 +46,7 @@ Bubble Tea TUI ↔ Views (Stateless) ↔ Data (Registry/DB/Tmux)
 
 <!-- SLAYGENT-REGISTRY-START -->
 # Inter-Agent Communication
-@/home/wv3/.slaygent/registry.json
+@/Users/williamvansickleiii/.slaygent/registry.json
 
 To send messages to other coding agents, use: `msg <agent_name> "<message>"`
 Example: `msg backend-dev "Please update the API endpoint"`
