@@ -535,30 +535,45 @@ func (m model) runSyncProgressCommand(selectedFiles []DiscoveredFile) tea.Cmd {
 			return syncProgressErrorMsg{error: "No custom content to sync"}
 		}
 
-		// Send initial log
-		go func() {
-			// This would normally be sent as a message, but for simplicity we'll use a channel or similar
-		}()
+		// We'll use a goroutine to send progress updates and then final completion
+		return m.executeProgressiveSync(selectedFiles, customContent)
+	}
+}
 
-		totalFiles := len(selectedFiles)
-		successCount := 0
+// executeProgressiveSync performs sync with real-time progress updates
+func (m model) executeProgressiveSync(selectedFiles []DiscoveredFile, customContent string) tea.Msg {
+	totalFiles := len(selectedFiles)
+	successCount := 0
+	var allLogs []string
 
-		for i, file := range selectedFiles {
-			// Write content to the file
-			if err := writeFileContent(file.Path, customContent); err != nil {
-				// Log error (in a real implementation, we'd send progress messages here)
-				_ = fmt.Sprintf("[%d/%d] Failed to sync %s: %v", i+1, totalFiles, file.Path, err)
-			} else {
-				// Log success
-				_ = fmt.Sprintf("[%d/%d] Successfully synced %s", i+1, totalFiles, file.Path)
-				successCount++
-			}
+	// Send initial log
+	initialMsg := fmt.Sprintf("Starting sync operation for %d files...", totalFiles)
+	allLogs = append(allLogs, initialMsg)
+
+	for i, file := range selectedFiles {
+		// Create progress message
+		progressMsg := fmt.Sprintf("[%d/%d] Syncing %s...", i+1, totalFiles, makeDisplayPath(file.Path))
+		allLogs = append(allLogs, progressMsg)
+
+		// Write content to the file
+		if err := writeFileContent(file.Path, customContent); err != nil {
+			errorMsg := fmt.Sprintf("[%d/%d] Failed to sync %s: %v", i+1, totalFiles, makeDisplayPath(file.Path), err)
+			allLogs = append(allLogs, errorMsg)
+		} else {
+			successMsg := fmt.Sprintf("[%d/%d] Successfully synced %s", i+1, totalFiles, makeDisplayPath(file.Path))
+			allLogs = append(allLogs, successMsg)
+			successCount++
 		}
 
-		return syncProgressCompleteMsg{
-			filesUpdated: successCount,
-			totalFiles:   totalFiles,
-		}
+		// Small delay to make progress visible
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Return completion with all logs
+	return syncProgressCompleteWithLogsMsg{
+		filesUpdated: successCount,
+		totalFiles:   totalFiles,
+		logs:         allLogs,
 	}
 }
 
@@ -574,6 +589,12 @@ type syncProgressCompleteMsg struct {
 
 type syncProgressErrorMsg struct {
 	error string
+}
+
+type syncProgressCompleteWithLogsMsg struct {
+	filesUpdated int
+	totalFiles   int
+	logs         []string
 }
 
 // writeFileContent writes custom content to the specified file
@@ -605,6 +626,25 @@ func writeFileContent(filePath, content string) error {
 	newContent := before + startMarker + "\n" + content + "\n" + endMarker + after
 
 	return os.WriteFile(filePath, []byte(newContent), 0644)
+}
+
+// makeDisplayPath converts absolute paths to user-friendly display paths
+func makeDisplayPath(absolutePath string) string {
+	// Get user's home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return absolutePath // Fallback to absolute path if we can't get home
+	}
+
+	// Convert to relative path from home directory
+	if strings.HasPrefix(absolutePath, homeDir) {
+		relPath, err := filepath.Rel(homeDir, absolutePath)
+		if err == nil {
+			return "~/" + relPath
+		}
+	}
+
+	return absolutePath // Fallback to absolute path
 }
 
 // syncTickCmd creates a tick for progress animation

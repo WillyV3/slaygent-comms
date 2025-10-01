@@ -43,8 +43,34 @@ cd tests && go test ./integration/... # Integration tests
 ```bash
 # Inspect message database
 sqlite3 ~/.slaygent/messages.db
-.schema messages
+
+# Useful SQLite commands for troubleshooting
+.headers on               # Show column names
+.mode column              # Pretty output
+.schema messages          # Show table structure
+
+# View recent messages with timestamps
 SELECT * FROM messages ORDER BY sent_at DESC LIMIT 10;
+
+# Debug date categorization issues
+SELECT
+  sender_name,
+  receiver_name,
+  datetime(sent_at, 'localtime') as local_time,
+  date(sent_at, 'localtime') as date_only,
+  julianday('now', 'localtime') - julianday(sent_at, 'localtime') as days_ago
+FROM messages
+ORDER BY sent_at DESC
+LIMIT 20;
+
+# Check conversation timestamps
+SELECT
+  agent1_name,
+  agent2_name,
+  datetime(last_message_at, 'localtime') as last_message,
+  julianday('now', 'localtime') - julianday(last_message_at, 'localtime') as days_ago
+FROM conversations
+ORDER BY last_message_at DESC;
 ```
 
 ## Architecture Overview
@@ -150,9 +176,28 @@ ESC - Back to agents
 - **Messages not delivering**: Verify tmux pane accessibility
 - **Database errors**: Check permissions on `~/.slaygent/messages.db`
 
+### Date Categories Issues (Fixed in Latest Version)
+If message date categories appear incorrect in the TUI messages panel:
+
+1. **Verify timestamps in database**:
+   ```bash
+   sqlite3 ~/.slaygent/messages.db
+   SELECT datetime(sent_at, 'localtime'), sender_name FROM messages ORDER BY sent_at DESC LIMIT 5;
+   ```
+
+2. **Check system timezone**: Date categorization uses local time boundaries
+   ```bash
+   date                    # Current system time
+   sqlite3 ~/.slaygent/messages.db "SELECT datetime('now', 'localtime');"
+   ```
+
+3. **Force TUI refresh**: Press `r` in agents view or restart `slay` to reload data
+
+**Note**: The original bug was in `app/tui/history/history.go` where time differences were calculated using hours instead of date boundaries, causing messages to appear in wrong categories (e.g., late-night messages from "yesterday" showing as "today"). This has been fixed with proper date-boundary calculations.
+
 <!-- SLAYGENT-REGISTRY-START -->
 # Inter-Agent Communication
-@/Users/williamvansickleiii/.slaygent/registry.json
+@~/.slaygent/registry.json
 
 To send messages to other coding agents, use: `msg <agent_name> "<message>"`
 Example: `msg backend-dev "Please update the API endpoint"`

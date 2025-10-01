@@ -69,6 +69,21 @@ func renderFilePickerError(errorMsg string, width, height int) string {
 			"macOS: brew install fd\n" +
 			"Linux: apt install fd-find\n\n" +
 			"Press ESC to return to sync view"
+	} else if strings.Contains(errorMsg, "no CLAUDE.md or AGENTS.md files found") {
+		content = "No CLAUDE.md or AGENTS.md files found\n\n" +
+			"Create CLAUDE.md files in your projects to use sync:\n" +
+			"echo '# My Project' > ~/myproject/CLAUDE.md\n\n" +
+			"The sync feature works by injecting agent communication\n" +
+			"context into existing CLAUDE.md and AGENTS.md files.\n\n" +
+			"Press ESC to return to sync view"
+	} else if strings.Contains(errorMsg, "none were valid") {
+		content = "Files found but none were accessible\n\n" +
+			"Some CLAUDE.md/AGENTS.md files were found but\n" +
+			"couldn't be read. This might be due to:\n" +
+			"• Permission issues\n" +
+			"• Files being in use\n" +
+			"• Network/disk problems\n\n" +
+			"Press ESC to return to sync view"
 	} else {
 		content = fmt.Sprintf("Error discovering files:\n\n%s\n\nPress ESC to return to sync view", errorMsg)
 	}

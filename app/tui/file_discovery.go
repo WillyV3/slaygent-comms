@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,9 +49,16 @@ func discoverFiles() ([]DiscoveredFile, error) {
 		return nil, err
 	}
 
+	// Check if we got any output
+	outputStr := strings.TrimSpace(string(output))
+	if outputStr == "" {
+		// No files found - provide helpful context
+		return nil, &noFilesFoundError{searchPath: homeDir}
+	}
+
 	// Parse output into DiscoveredFile structs
 	var files []DiscoveredFile
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	lines := strings.Split(outputStr, "\n")
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -62,6 +70,12 @@ func discoverFiles() ([]DiscoveredFile, error) {
 		fileName := filepath.Base(line)
 		if fileName != "CLAUDE.md" && fileName != "AGENTS.md" {
 			continue // Skip if not exactly our target files
+		}
+
+		// Verify file is readable
+		if _, err := os.Stat(line); err != nil {
+			// File exists in fd output but can't be read - skip with warning
+			continue
 		}
 
 		// Get directory name for display
@@ -79,6 +93,15 @@ func discoverFiles() ([]DiscoveredFile, error) {
 		})
 	}
 
+	// Final check - if we filtered out all files
+	if len(files) == 0 {
+		return nil, &noValidFilesError{
+			searchPath:  homeDir,
+			foundCount:  len(lines),
+			validCount:  0,
+		}
+	}
+
 	return files, nil
 }
 
@@ -87,6 +110,26 @@ type fdNotFoundError struct{}
 
 func (e *fdNotFoundError) Error() string {
 	return "fd command not found - install with: brew install fd"
+}
+
+// noFilesFoundError represents when no CLAUDE.md or AGENTS.md files exist
+type noFilesFoundError struct {
+	searchPath string
+}
+
+func (e *noFilesFoundError) Error() string {
+	return fmt.Sprintf("no CLAUDE.md or AGENTS.md files found in %s", e.searchPath)
+}
+
+// noValidFilesError represents when files were found but none were valid/readable
+type noValidFilesError struct {
+	searchPath  string
+	foundCount  int
+	validCount  int
+}
+
+func (e *noValidFilesError) Error() string {
+	return fmt.Sprintf("found %d files in %s but none were valid CLAUDE.md/AGENTS.md files", e.foundCount, e.searchPath)
 }
 
 // selectCurrentProjectFiles automatically selects files in/under current working directory

@@ -46,7 +46,7 @@ SELECT * FROM messages ORDER BY sent_at DESC LIMIT 5;
 
 <!-- SLAYGENT-REGISTRY-START -->
 # Inter-Agent Communication
-@/home/wv3/.slaygent/registry.json
+@~/.slaygent/registry.json
 
 To send messages to other coding agents, use: `msg <agent_name> "<message>"`
 Example: `msg backend-dev "Please update the API endpoint"`

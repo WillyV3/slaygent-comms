@@ -123,6 +123,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		completionMsg := fmt.Sprintf("Successfully synced %d out of %d files", msg.filesUpdated, msg.totalFiles)
 		m.syncProgressLogs = append(m.syncProgressLogs, completionMsg)
 		return m, nil
+	case syncProgressCompleteWithLogsMsg:
+		// Sync is complete with full logs
+		m.syncProgressActive = false
+		m.syncProgressLogs = msg.logs // Replace with all collected logs
+		finalMsg := fmt.Sprintf("Sync complete: %d out of %d files updated successfully", msg.filesUpdated, msg.totalFiles)
+		m.syncProgressLogs = append(m.syncProgressLogs, finalMsg)
+		// Note: Keep spinner running to show completion state, it will be cleaned up on ESC
+		return m, nil
 	case syncProgressErrorMsg:
 		// Sync failed
 		m.syncProgressActive = false
@@ -295,12 +303,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.filePickerMode {
 			switch msg.String() {
 			case "esc":
-				// Exit file picker and return to sync view
+				// Clean exit from file picker mode
 				m.filePickerMode = false
 				m.discoveredFiles = nil
 				m.filePickerIndex = 0
 				m.filePickerLoading = false
 				m.filePickerError = ""
+				// Reset all spinners to stop any pending ticks
+				m.filePickerSpinners = nil
 				return m, nil
 			case "up", "k":
 				if len(m.discoveredFiles) > 0 && m.filePickerIndex > 0 {
@@ -361,11 +371,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.syncProgressMode {
 			switch msg.String() {
 			case "esc":
-				// Exit sync progress mode and return to file picker or sync view
+				// Clean exit from sync progress mode
 				m.syncProgressMode = false
 				m.syncProgressActive = false
 				m.syncProgressLogs = nil
 				m.syncProgressError = ""
+				// Reset spinner to stop any pending ticks
+				m.syncProgressSpinner = spinner.Model{}
 
 				// Return to file picker if files are still available
 				if len(m.discoveredFiles) > 0 {
@@ -375,6 +387,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewMode = "sync"
 				}
 				return m, nil
+			case "q", "ctrl+c":
+				// Allow quit from sync progress
+				return m, tea.Quit
 			}
 			// In sync progress mode, ignore other key inputs
 			return m, nil
