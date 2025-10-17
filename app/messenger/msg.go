@@ -86,26 +86,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Find pane
+	// Find pane - ALWAYS use directory-based search for correctness
+	// Previous optimization using findAgentPaneByType() for established conversations
+	// caused misrouting when multiple agents of the same type were active
 	var pane *Pane
-
-	// If using --from, check if conversation exists in DB
-	if senderName != "" && ConversationExists(senderName, targetAgent.Name) {
-		// For established conversations, just find by agent type
-		pane = findAgentPaneByType(targetAgent.AgentType)
-		if pane == nil {
-			fmt.Fprintf(os.Stderr, "Error: %s (%s) not found in any active pane\n",
-				targetAgent.Name, targetAgent.AgentType)
-			os.Exit(1)
-		}
-	} else {
-		// For new conversations or without --from, use directory-based search
-		pane = findAgentPane(targetAgent)
-		if pane == nil {
-			fmt.Fprintf(os.Stderr, "Error: %s (%s) not found in %s\n",
-				targetAgent.Name, targetAgent.AgentType, targetAgent.Directory)
-			os.Exit(1)
-		}
+	pane = findAgentPane(targetAgent)
+	if pane == nil {
+		fmt.Fprintf(os.Stderr, "Error: %s (%s) not found in %s\n",
+			targetAgent.Name, targetAgent.AgentType, targetAgent.Directory)
+		os.Exit(1)
 	}
 
 	// Send message

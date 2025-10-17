@@ -197,6 +197,11 @@ func LogMessageExplicit(senderName string, receiver *RegistryEntry, message stri
 	return LogMessage(senderName, senderDir, receiver.Name, receiver.Directory, message)
 }
 
+// ConversationExists checks if a conversation exists between two agents by name only.
+// DEPRECATED: This function only checks names, not directories. This caused message
+// misrouting when multiple agents of the same type were active. Use
+// ConversationExistsWithDirectory() instead for directory-aware verification.
+// Kept for backward compatibility with TUI tools.
 func ConversationExists(agent1Name, agent2Name string) bool {
 	if db == nil {
 		return false
@@ -212,6 +217,47 @@ func ConversationExists(agent1Name, agent2Name string) bool {
 		WHERE (agent1_name = ? AND agent2_name = ?)
 		OR (agent1_name = ? AND agent2_name = ?)`,
 		names[0], names[1], names[1], names[0],
+	).Scan(&count)
+
+	if err != nil {
+		return false
+	}
+
+	return count > 0
+}
+
+// ConversationExistsWithDirectory checks if a conversation exists between two specific
+// agent instances, verifying BOTH name AND directory. This ensures the correct agents
+// are matched when multiple agents of the same type are running.
+func ConversationExistsWithDirectory(agent1Name, agent1Dir, agent2Name, agent2Dir string) bool {
+	if db == nil {
+		return false
+	}
+
+	// Sort agents for consistent lookup (same logic as getOrCreateConversation)
+	type agentInfo struct {
+		Name string
+		Dir  string
+	}
+	agents := []agentInfo{
+		{agent1Name, agent1Dir},
+		{agent2Name, agent2Dir},
+	}
+
+	sort.Slice(agents, func(i, j int) bool {
+		if agents[i].Name == agents[j].Name {
+			return agents[i].Dir < agents[j].Dir
+		}
+		return agents[i].Name < agents[j].Name
+	})
+
+	var count int
+	err := db.QueryRow(`
+		SELECT COUNT(*) FROM conversations
+		WHERE (agent1_name = ? AND agent1_dir = ? AND agent2_name = ? AND agent2_dir = ?)
+		OR (agent1_name = ? AND agent1_dir = ? AND agent2_name = ? AND agent2_dir = ?)`,
+		agents[0].Name, agents[0].Dir, agents[1].Name, agents[1].Dir,
+		agents[1].Name, agents[1].Dir, agents[0].Name, agents[0].Dir,
 	).Scan(&count)
 
 	if err != nil {
