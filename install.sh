@@ -306,6 +306,30 @@ install_binaries() {
         print_error "Failed to install Messenger"
         exit 1
     fi
+
+    # Install sync scripts alongside binaries
+    local scripts_dir="${INSTALL_DIR}/../scripts"
+    if [[ ! -d "${scripts_dir}" ]]; then
+        print_info "Creating scripts directory: ${scripts_dir}"
+        mkdir -p "${scripts_dir}"
+    fi
+
+    local script_source="${PROJECT_ROOT}/app/scripts"
+    if [[ -d "${script_source}" ]]; then
+        print_info "Installing sync scripts to ${scripts_dir}"
+        for script in "${script_source}"/*.sh; do
+            if [[ -f "${script}" ]]; then
+                local script_name=$(basename "${script}")
+                if cp "${script}" "${scripts_dir}/${script_name}" && chmod +x "${scripts_dir}/${script_name}"; then
+                    print_success "Installed ${script_name}"
+                else
+                    print_warning "Failed to install ${script_name}"
+                fi
+            fi
+        done
+    else
+        print_warning "Scripts directory not found at ${script_source}"
+    fi
 }
 
 # Configure shell aliases

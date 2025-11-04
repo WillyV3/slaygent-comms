@@ -301,61 +301,78 @@ func (m model) View() string {
 	})
 }
 
-// findSyncScript returns the path to the sync script, checking multiple locations
+// findSyncScript returns the path to the sync script using portable, system-detected paths
 func findSyncScript(scriptName string) string {
-	// PRIORITY 1: Dynamic Homebrew detection (works on any machine)
+	// PRIORITY 1: Relative to executable (handles installed binaries)
+	if execPath, err := os.Executable(); err == nil {
+		// Resolve symlinks to get actual binary location
+		if realPath, err := filepath.EvalSymlinks(execPath); err == nil {
+			execPath = realPath
+		}
+
+		// Check ../scripts/ relative to binary (for direct installs to ~/.local/bin)
+		scriptPath := filepath.Join(filepath.Dir(execPath), "..", "scripts", scriptName)
+		if absPath, err := filepath.Abs(scriptPath); err == nil {
+			if _, err := os.Stat(absPath); err == nil {
+				return absPath
+			}
+		}
+
+		// Check if installed via Homebrew structure (lib/slaygent-comms)
+		libPath := filepath.Join(filepath.Dir(execPath), "..", "lib", "slaygent-comms", scriptName)
+		if absPath, err := filepath.Abs(libPath); err == nil {
+			if _, err := os.Stat(absPath); err == nil {
+				return absPath
+			}
+		}
+	}
+
+	// PRIORITY 2: Development mode - relative to source tree
+	// Try multiple relative paths to handle different working directories
+	devPaths := []string{
+		"../scripts/" + scriptName,           // From app/tui/
+		"../../app/scripts/" + scriptName,    // From nested dirs
+		"./app/scripts/" + scriptName,        // From project root
+	}
+
+	for _, relPath := range devPaths {
+		if absPath, err := filepath.Abs(relPath); err == nil {
+			if _, err := os.Stat(absPath); err == nil {
+				return absPath
+			}
+		}
+	}
+
+	// PRIORITY 3: Dynamic Homebrew detection (if brew command available)
 	if brewPrefix := getHomebrewPrefix(); brewPrefix != "" {
-		// Check lib location FIRST (stable, version-independent)
+		// Check lib location (stable, version-independent)
 		libPath := filepath.Join(brewPrefix, "lib", "slaygent-comms", scriptName)
 		if _, err := os.Stat(libPath); err == nil {
 			return libPath
 		}
 
-		// Check Cellar as fallback (for older versions)
+		// Check Cellar with version detection
 		cellarBase := filepath.Join(brewPrefix, "Cellar", "slaygent-comms")
 		if entries, err := os.ReadDir(cellarBase); err == nil {
 			for _, entry := range entries {
 				if entry.IsDir() {
-					dynamicPath := filepath.Join(cellarBase, entry.Name(), "libexec", scriptName)
-					if _, err := os.Stat(dynamicPath); err == nil {
-						return dynamicPath
+					cellarPath := filepath.Join(cellarBase, entry.Name(), "libexec", scriptName)
+					if _, err := os.Stat(cellarPath); err == nil {
+						return cellarPath
 					}
 				}
 			}
 		}
 	}
 
-	// PRIORITY 2: Standard Homebrew locations (fallback)
-	standardPaths := []string{
-		"/opt/homebrew/Cellar/slaygent-comms",      // macOS ARM
-		"/usr/local/Cellar/slaygent-comms",         // macOS Intel
-		"/home/linuxbrew/.linuxbrew/Cellar/slaygent-comms", // Linux
-	}
-
-	for _, cellarBase := range standardPaths {
-		if entries, err := os.ReadDir(cellarBase); err == nil {
-			for _, entry := range entries {
-				if entry.IsDir() {
-					dynamicPath := filepath.Join(cellarBase, entry.Name(), "libexec", scriptName)
-					if _, err := os.Stat(dynamicPath); err == nil {
-						return dynamicPath
-					}
-				}
-			}
-		}
-	}
-
-	// PRIORITY 3: Development mode (relative path)
-	relativePath := "../scripts/" + scriptName
-	if _, err := os.Stat(relativePath); err == nil {
-		return relativePath
-	}
-
-	// PRIORITY 4: System install locations
+	// PRIORITY 4: Standard XDG/FHS locations
+	homeDir, _ := os.UserHomeDir()
 	systemPaths := []string{
-		"/opt/homebrew/lib/slaygent-comms/" + scriptName,
+		filepath.Join(homeDir, ".local", "share", "slaygent-comms", scriptName),
+		filepath.Join(homeDir, ".local", "lib", "slaygent-comms", scriptName),
+		"/usr/local/share/slaygent-comms/" + scriptName,
 		"/usr/local/lib/slaygent-comms/" + scriptName,
-		"/home/linuxbrew/.linuxbrew/lib/slaygent-comms/" + scriptName,
+		"/usr/share/slaygent-comms/" + scriptName,
 		"/usr/lib/slaygent-comms/" + scriptName,
 	}
 
@@ -366,7 +383,7 @@ func findSyncScript(scriptName string) string {
 	}
 
 	// FALLBACK: Return path that will cause clear error
-	return "/usr/bin/false" // This will fail with clear error message
+	return "/usr/bin/false"
 }
 
 // getHomebrewPrefix returns the Homebrew prefix if brew is available
