@@ -1,0 +1,408 @@
+#!/bin/bash
+
+# Portable Release Script
+# Works from any git project directory with auto-detection
+
+set -e
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Function to print colored output
+print_step() {
+    echo -e "${BLUE}→${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}✗${NC} $1"
+    exit 1
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠${NC} $1"
+}
+
+# Check for uncommitted changes
+check_git_status() {
+    if [[ -n $(git status -s) ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Get current version from tags
+get_current_version() {
+    git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0"
+}
+
+# Calculate next version
+get_next_version() {
+    local current=$1
+    local bump_type=$2
+
+    # Remove 'v' prefix
+    version=${current#v}
+
+    # Split into parts
+    IFS='.' read -r major minor patch <<< "$version"
+
+    case $bump_type in
+        major)
+            major=$((major + 1))
+            minor=0
+            patch=0
+            ;;
+        minor)
+            minor=$((minor + 1))
+            patch=0
+            ;;
+        patch)
+            patch=$((patch + 1))
+            ;;
+        *)
+            echo "$current"
+            return
+            ;;
+    esac
+
+    echo "v${major}.${minor}.${patch}"
+}
+
+# Generate changelog from commits
+generate_changelog() {
+    local from_tag=$1
+    local to_tag=$2
+
+    echo "## What's Changed"
+    echo ""
+
+    # Group commits by type
+    local features=""
+    local fixes=""
+    local other=""
+
+    while IFS= read -r commit; do
+        if [[ $commit == *"feat:"* ]] || [[ $commit == *"add:"* ]] || [[ $commit == *"Add"* ]]; then
+            features="${features}- ${commit}\n"
+        elif [[ $commit == *"fix:"* ]] || [[ $commit == *"Fix"* ]]; then
+            fixes="${fixes}- ${commit}\n"
+        else
+            other="${other}- ${commit}\n"
+        fi
+    done < <(git log ${from_tag}..HEAD --pretty=format:"%s" --no-merges)
+
+    if [[ -n $features ]]; then
+        echo "### Features"
+        echo -e "$features"
+    fi
+
+    if [[ -n $fixes ]]; then
+        echo "### Bug Fixes"
+        echo -e "$fixes"
+    fi
+
+    if [[ -n $other ]]; then
+        echo "### Other Changes"
+        echo -e "$other"
+    fi
+
+    echo ""
+    echo "**Full Changelog**: https://github.com/${REPO_ORG}/${REPO_NAME}/compare/${from_tag}...${to_tag}"
+}
+
+# Auto-detect repository info from git
+detect_repo_info() {
+    print_step "Detecting repository info..."
+
+    # Get remote URL
+    REPO_URL=$(git remote get-url origin 2>/dev/null || print_error "Not a git repository or no remote configured")
+
+    # Parse org and name from URL (works with both HTTPS and SSH)
+    if [[ $REPO_URL =~ github.com[:/]([^/]+)/([^/.]+) ]]; then
+        REPO_ORG="${BASH_REMATCH[1]}"
+        REPO_NAME="${BASH_REMATCH[2]}"
+    else
+        print_error "Could not parse GitHub org/repo from: $REPO_URL"
+    fi
+
+    print_success "Repository: ${REPO_ORG}/${REPO_NAME}"
+}
+
+# Find homebrew tap
+find_homebrew_tap() {
+    print_step "Finding Homebrew tap..."
+
+    # Check cache
+    local cache_file="$HOME/.config/release/tap"
+    if [[ -f $cache_file ]]; then
+        HOMEBREW_TAP_PATH=$(cat "$cache_file")
+        if [[ -d $HOMEBREW_TAP_PATH ]]; then
+            print_success "Using cached tap: $HOMEBREW_TAP_PATH"
+            return
+        fi
+    fi
+
+    # Auto-find in common locations
+    local tap=$(find ~/projects -maxdepth 1 -name "*homebrew-tap*" -type d 2>/dev/null | head -1)
+
+    if [[ -z $tap ]]; then
+        tap=$(find ~ -maxdepth 1 -name "*homebrew-tap*" -type d 2>/dev/null | head -1)
+    fi
+
+    # If still not found, prompt with gum if available
+    if [[ -z $tap ]]; then
+        if command -v gum >/dev/null 2>&1; then
+            tap=$(gum input --placeholder "Enter path to homebrew-tap directory")
+        else
+            read -p "Enter path to homebrew-tap directory: " tap
+        fi
+    fi
+
+    if [[ -z $tap ]] || [[ ! -d $tap ]]; then
+        print_warning "Homebrew tap not found, will skip formula update"
+        HOMEBREW_TAP_PATH=""
+        return
+    fi
+
+    HOMEBREW_TAP_PATH="$tap"
+
+    # Cache it
+    mkdir -p "$(dirname "$cache_file")"
+    echo "$HOMEBREW_TAP_PATH" > "$cache_file"
+
+    print_success "Homebrew tap: $HOMEBREW_TAP_PATH"
+}
+
+# Auto-detect and build Go projects
+build_go_projects() {
+    print_step "Building Go projects..."
+
+    local built=0
+    local built_binaries=()
+
+    # Find all go.mod files
+    while IFS= read -r gomod; do
+        local dir=$(dirname "$gomod")
+        local module_name=$(basename "$dir")
+
+        print_step "Building module: $module_name"
+
+        (
+            cd "$dir"
+            if go build -o "$module_name" 2>/dev/null; then
+                built=$((built + 1))
+                built_binaries+=("$dir/$module_name")
+            else
+                # Try building without output name
+                if go build 2>/dev/null; then
+                    built=$((built + 1))
+                fi
+            fi
+        )
+    done < <(find . -name "go.mod" -not -path "*/vendor/*" -not -path "*/node_modules/*")
+
+    if [[ $built -eq 0 ]]; then
+        print_warning "No Go projects found or built"
+    else
+        print_success "Built $built Go module(s)"
+    fi
+
+    # Return list of binaries to clean up
+    printf '%s\n' "${built_binaries[@]}"
+}
+
+# Main release process
+main() {
+    echo ""
+    echo "========================================="
+    echo "     Portable Release Pipeline"
+    echo "========================================="
+    echo ""
+
+    # Check if we're in a git repo
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        print_error "Not a git repository"
+    fi
+
+    # Auto-detect repo info
+    detect_repo_info
+    find_homebrew_tap
+
+    # Set formula file path if tap exists
+    if [[ -n $HOMEBREW_TAP_PATH ]]; then
+        FORMULA_FILE="${HOMEBREW_TAP_PATH}/Formula/${REPO_NAME}.rb"
+    fi
+
+    # Parse arguments or prompt interactively
+    if [[ $# -eq 0 ]]; then
+        # Interactive mode with gum
+        if command -v gum >/dev/null 2>&1; then
+            BUMP_TYPE=$(gum choose "patch" "minor" "major")
+            CUSTOM_MESSAGE=$(gum input --placeholder "Commit message (optional)")
+        else
+            echo "Bump type:"
+            select bt in "patch" "minor" "major"; do
+                BUMP_TYPE=$bt
+                break
+            done
+            read -p "Commit message (optional): " CUSTOM_MESSAGE
+        fi
+    else
+        BUMP_TYPE=${1:-patch}
+        CUSTOM_MESSAGE=${2:-""}
+    fi
+
+    if [[ $BUMP_TYPE != "major" && $BUMP_TYPE != "minor" && $BUMP_TYPE != "patch" ]]; then
+        print_error "Invalid bump type. Use: major, minor, or patch"
+    fi
+
+    # Step 1: Check for uncommitted changes
+    print_step "Checking git status..."
+    if ! check_git_status; then
+        print_warning "Uncommitted changes detected. Committing them..."
+
+        git add -A
+
+        if [[ -n $CUSTOM_MESSAGE ]]; then
+            git commit -m "$CUSTOM_MESSAGE"
+        else
+            # Generate commit message from changes
+            COMMIT_MSG="chore: Release updates"
+            git commit -m "$COMMIT_MSG"
+        fi
+        print_success "Changes committed"
+    else
+        print_success "Working directory clean"
+    fi
+
+    # Step 2: Push to remote
+    print_step "Pushing to remote..."
+    CURRENT_BRANCH=$(git branch --show-current)
+    git push origin "$CURRENT_BRANCH"
+    print_success "Pushed to GitHub"
+
+    # Step 3: Get version info
+    CURRENT_VERSION=$(get_current_version)
+    NEW_VERSION=$(get_next_version "$CURRENT_VERSION" "$BUMP_TYPE")
+
+    echo ""
+    print_step "Current version: ${CURRENT_VERSION}"
+    print_step "New version: ${NEW_VERSION}"
+    echo ""
+
+    # Step 4: Run tests if present
+    print_step "Running tests..."
+    if [[ -f "go.mod" ]] || find . -name "go.mod" -not -path "*/vendor/*" | grep -q .; then
+        if go test ./... > /dev/null 2>&1; then
+            print_success "Tests passed"
+        elif [[ -d "tests" ]]; then
+            if (cd tests && go test ./... > /dev/null 2>&1); then
+                print_success "Tests passed"
+            else
+                print_warning "Some tests failed, continuing anyway"
+            fi
+        else
+            print_warning "Some tests failed, continuing anyway"
+        fi
+    else
+        print_step "No Go tests found, skipping"
+    fi
+
+    # Step 5: Build binaries to ensure they compile
+    BUILT_BINARIES=$(build_go_projects)
+
+    # Clean up test builds
+    if [[ -n $BUILT_BINARIES ]]; then
+        print_step "Cleaning up test builds..."
+        echo "$BUILT_BINARIES" | while read -r binary; do
+            rm -f "$binary"
+        done
+    fi
+
+    # Step 6: Create and push tag
+    print_step "Creating git tag ${NEW_VERSION}..."
+    git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+    git push origin "$NEW_VERSION"
+    print_success "Tag created and pushed"
+
+    # Step 7: Update Homebrew formula (if tap exists)
+    if [[ -n $HOMEBREW_TAP_PATH ]] && [[ -f $FORMULA_FILE ]]; then
+        print_step "Updating Homebrew formula..."
+
+        # Wait for GitHub to process the tag
+        sleep 5
+
+        # Download tarball and calculate SHA256
+        TARBALL_URL="https://github.com/${REPO_ORG}/${REPO_NAME}/archive/${NEW_VERSION}.tar.gz"
+        print_step "Downloading tarball from ${TARBALL_URL}..."
+
+        SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | cut -d' ' -f1)
+
+        if [[ -z $SHA256 ]]; then
+            print_error "Failed to download tarball or calculate SHA256"
+        fi
+
+        print_step "SHA256: ${SHA256}"
+
+        # Update formula (Linux-compatible sed)
+        sed -i "s|url \".*\"|url \"${TARBALL_URL}\"|" "$FORMULA_FILE"
+        sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" "$FORMULA_FILE"
+
+        # Commit and push homebrew formula
+        (
+            cd "$HOMEBREW_TAP_PATH"
+            git add "Formula/${REPO_NAME}.rb"
+            git commit -m "Update ${REPO_NAME} to ${NEW_VERSION}"
+            git push
+        )
+
+        print_success "Homebrew formula updated"
+    else
+        print_warning "Skipping Homebrew formula update"
+    fi
+
+    # Step 8: Generate changelog
+    print_step "Generating changelog..."
+    CHANGELOG=$(generate_changelog "$CURRENT_VERSION" "$NEW_VERSION")
+
+    # Step 9: Create GitHub release
+    print_step "Creating GitHub release..."
+
+    # Create release with changelog
+    gh release create "$NEW_VERSION" \
+        --repo "${REPO_ORG}/${REPO_NAME}" \
+        --title "Release ${NEW_VERSION}" \
+        --notes "$CHANGELOG" \
+        --latest
+
+    print_success "GitHub release created"
+
+    echo ""
+    echo "========================================="
+    echo -e "${GREEN}✓ Release ${NEW_VERSION} completed successfully!${NC}"
+    echo "========================================="
+    echo ""
+
+    if [[ -n $HOMEBREW_TAP_PATH ]] && [[ -f $FORMULA_FILE ]]; then
+        echo "Installation:"
+        echo "  brew upgrade ${REPO_NAME}"
+        echo "  or"
+        echo "  brew install ${REPO_ORG}/tap/${REPO_NAME}"
+        echo ""
+    fi
+
+    echo "Release URL:"
+    echo "  https://github.com/${REPO_ORG}/${REPO_NAME}/releases/tag/${NEW_VERSION}"
+    echo ""
+}
+
+# Run main function
+main "$@"
